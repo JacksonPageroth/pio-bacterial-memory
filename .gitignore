@@ -1,4 +1,4 @@
 *.pyc
-*.DS_Store
+*DS_Store
 .ipynb_checkpoints/pio_subculture-checkpoint.ipynb
 od_logs/.DS_Store
