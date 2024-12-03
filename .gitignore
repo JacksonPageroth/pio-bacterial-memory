@@ -5,3 +5,4 @@ od_logs/.DS_Store
 .DS_Store
 od_logs/latest_od_data.csv
 od_logs/latest_od_data.zip
+*.csv
