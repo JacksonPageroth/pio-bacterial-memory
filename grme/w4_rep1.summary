@@ -1,0 +1,16 @@
+	Growth	Growth
+	Rate	Rate
+Well	min	hours	R	Max OD	lag time (minutes)
+w4_rep1_S1	0.00965	0.579	0.99841	0.2664	976.9
+w4_rep1_S2	0.00291	0.174	0.98885	0.26489999999999997	1126.6	Warning! R is <0.99.  GrowthRate may be unreliable!
+w4_rep1_S3	0.00774	0.464	0.99894	0.2097	1009.1
+w4_rep1_S4	0.00318	0.191	0.99579	0.1075	878.3
+w4_rep1_S5	0.00868	0.521	0.99703	0.2339	1185.7
+w4_rep1_S6	0.00298	0.179	0.98425	0.13390000000000002	1386.5	Warning! R is <0.99.  GrowthRate may be unreliable!
+w4_rep1_S7	0.00758	0.455	0.99777	0.2095	1126.4
+w4_rep1_S8	0.00259	0.156	0.9999	0.2729	1276.7
+w4_rep1_S9	0.00811	0.487	0.99919	0.2325	1074.4
+w4_rep1_S10	0.00505	0.303	0.98232	0.18579999999999997	3.0	Warning! R is <0.99.  GrowthRate may be unreliable!
+w4_rep1_S11	0.00764	0.459	0.99877	0.2791	1061.0
+w4_rep1_S12	0.00308	0.185	0.98167	0.1526	1059.7	Warning! R is <0.99.  GrowthRate may be unreliable!
+w4_rep1_S13	0.00766	0.46	0.99829	0.2038	1107.4
