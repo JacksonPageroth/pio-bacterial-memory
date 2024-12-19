@@ -1,6 +1,6 @@
 GrowthRates 6.2 ©2022 All Rights Reserved Bellingham Research Institute.
 
-Sun Dec 15 19:23:27 2024	The input file was grme/w3_rep2.txt
+Wed Dec 18 17:26:32 2024	The input file was grme/w3_rep2.txt
 ******************************************************************
            Well w3_rep2_S1
 6 points from 1180.0 through 1230.0 minutes were  used to estimate the growth rate.
@@ -139,5 +139,15 @@ This is equivalent to a doubling time of 159.1 ± 16.07 minutes.
 The correlation coefficient R is 0.98505
 The maximum OD is 0.2081.
 The lag time is 775.0 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S16
+5 points from 1450.0 through 1490.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00729 ± 0.000273 per minute or 0.4375 ± 0.0164 per hour .
+This is equivalent to a doubling time of 95.0 ± 3.56 minutes.
+The correlation coefficient R is 0.9979
+The maximum OD is 0.2852.
+The lag time is 1095.7 minutes
 ******************************************************************
 
