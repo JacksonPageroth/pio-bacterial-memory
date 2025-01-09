@@ -1,0 +1,17 @@
+	Growth	Growth
+	Rate	Rate
+Well	min	hours	R	Max OD	lag time (minutes)
+W3 - Replicate 1_8	0.00356	0.213	0.9982	0.10993	1212.7
+W3 - Replicate 1_14	0.00426	0.256	0.98693	0.21138448347119912	698.0	Warning! R is <0.99.  GrowthRate may be unreliable!
+W3 - Replicate 1_5	0.0067	0.402	0.99701	0.22995	1198.1
+W3 - Replicate 1_4	0.0035	0.21	0.9889	0.11172222420798741	683.1	Warning! R is <0.99.  GrowthRate may be unreliable!
+W3 - Replicate 1_15	0.0073	0.438	0.99781	0.28519	1007.2
+W3 - Replicate 1_12	0.00654	0.393	0.98161	0.27156635738289187	463.3	Warning! R is <0.99.  GrowthRate may be unreliable!
+W3 - Replicate 1_11	0.00658	0.395	0.99936	0.24016	999.4
+W3 - Replicate 1_7	0.00679	0.408	0.99879	0.18071	1093.2
+W3 - Replicate 1_6	0.00297	0.178	0.99631	0.18152	1090.1
+W3 - Replicate 1_3	0.00659	0.395	0.99875	0.20064	982.3
+W3 - Replicate 1_2	0.00334	0.2	0.98528	0.25539989662175067	1194.2	Warning! R is <0.99.  GrowthRate may be unreliable!
+W3 - Replicate 1_9	0.00749	0.449	0.99926	0.21555	1288.9
+W3 - Replicate 1_13	0.00624	0.375	0.99851	0.20815	896.4
+W3 - Replicate 1_1	0.00691	0.414	0.99868	0.27199	850.3

@@ -1,0 +1,14 @@
+	Growth	Growth
+	Rate	Rate
+Well	min	hours	R	Max OD	lag time (minutes)
+W5 - 55 ppt Control_4	0.00345	0.207	0.99312	0.25097	1485.5
+W5 - 55 ppt Control_13	0.0036	0.216	0.98796	0.13729478575374818	890.0	Warning! R is <0.99.  GrowthRate may be unreliable!
+W5 - 55 ppt Control_7	0.00262	0.157	0.99633	0.26436	1137.5
+W5 - 55 ppt Control_11	0.00593	0.356	0.98237	0.2460400432371055	989.7	Warning! R is <0.99.  GrowthRate may be unreliable!
+W5 - 55 ppt Control_6	0.0045	0.27	0.99386	0.29663	1361.9
+W5 - 55 ppt Control_8	0.00345	0.207	0.98914	0.19045872650872564	1550.7	Warning! R is <0.99.  GrowthRate may be unreliable!
+W5 - 55 ppt Control_5	0.00249	0.15	0.99214	0.13963	1240.2
+W5 - 55 ppt Control_12	0.00357	0.214	0.98488	0.22997688936496694	951.1	Warning! R is <0.99.  GrowthRate may be unreliable!
+W5 - 55 ppt Control_2	0.00302	0.181	0.99077	0.17245	1058.6
+W5 - 55 ppt Control_1	0.00294	0.177	0.98791	0.23470616880565484	813.7	Warning! R is <0.99.  GrowthRate may be unreliable!
+W5 - 55 ppt Control_9	0.00323	0.194	0.98548	0.17591718484311455	1728.5	Warning! R is <0.99.  GrowthRate may be unreliable!

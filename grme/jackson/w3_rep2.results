@@ -1,0 +1,153 @@
+GrowthRates 6.2 ©2022 All Rights Reserved Bellingham Research Institute.
+
+Wed Jan  8 09:55:26 2025	The input file was grme/jackson/w3_rep2.txt
+******************************************************************
+           Well w3_rep2_S1
+6 points from 1180.0 through 1230.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00693 ± 0.000182 per minute or 0.4156 ± 0.0109 per hour .
+This is equivalent to a doubling time of 100.1 ± 2.63 minutes.
+The correlation coefficient R is 0.99863
+The maximum OD is 0.2571.
+The lag time is 850.0 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S2
+5 points from 1530.0 through 1570.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00327 ± 0.000315 per minute or 0.1961 ± 0.01891 per hour .
+This is equivalent to a doubling time of 212.1 ± 20.46 minutes.
+The correlation coefficient R is 0.98633
+The maximum OD is 0.2499.
+The lag time is 1191.8 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S3
+5 points from 1340.0 through 1380.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00658 ± 0.000196 per minute or 0.3948 ± 0.01175 per hour .
+This is equivalent to a doubling time of 105.4 ± 3.14 minutes.
+The correlation coefficient R is 0.99867
+The maximum OD is 0.1943.
+The lag time is 972.7 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S4
+7 points from 1480.0 through 1540.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00315 ± 0.000113 per minute or 0.1888 ± 0.0068 per hour .
+This is equivalent to a doubling time of 220.3 ± 7.94 minutes.
+The correlation coefficient R is 0.99677
+The maximum OD is 0.1107.
+The lag time is 1148.6 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S5
+6 points from 1500.0 through 1550.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00671 ± 0.000265 per minute or 0.4023 ± 0.01593 per hour .
+This is equivalent to a doubling time of 103.4 ± 4.09 minutes.
+The correlation coefficient R is 0.99688
+The maximum OD is 0.2262.
+The lag time is 1177.7 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S6
+5 points from 1390.0 through 1430.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00298 ± 0.000148 per minute or 0.179 ± 0.00889 per hour .
+This is equivalent to a doubling time of 232.4 ± 11.54 minutes.
+The correlation coefficient R is 0.99632
+The maximum OD is 0.1803.
+The lag time is 1062.8 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S7
+6 points from 1370.0 through 1420.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00679 ± 0.000177 per minute or 0.4073 ± 0.01062 per hour .
+This is equivalent to a doubling time of 102.1 ± 2.66 minutes.
+The correlation coefficient R is 0.99864
+The maximum OD is 0.1807.
+The lag time is 1073.0 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S8
+5 points from 1430.0 through 1470.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00355 ± 0.000107 per minute or 0.2127 ± 0.0064 per hour .
+This is equivalent to a doubling time of 195.5 ± 5.88 minutes.
+The correlation coefficient R is 0.99865
+The maximum OD is 0.1099.
+The lag time is 1192.6 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S9
+5 points from 1460.0 through 1500.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00754 ± 0.00017 per minute or 0.4524 ± 0.0102 per hour .
+This is equivalent to a doubling time of 91.9 ± 2.07 minutes.
+The correlation coefficient R is 0.99924
+The maximum OD is 0.2142.
+The lag time is 1180.6 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S10
+6 points from 1110.0 through 1160.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00373 ± 7.7e-05 per minute or 0.2236 ± 0.00462 per hour .
+This is equivalent to a doubling time of 186.0 ± 3.85 minutes.
+The correlation coefficient R is 0.99915
+The maximum OD is 0.175.
+The lag time is 923.7 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S11
+5 points from 1410.0 through 1450.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00675 ± 0.000155 per minute or 0.405 ± 0.00929 per hour .
+This is equivalent to a doubling time of 102.7 ± 2.36 minutes.
+The correlation coefficient R is 0.99921
+The maximum OD is 0.2402.
+The lag time is 1089.2 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S12
+5 points from 1460.0 through 1500.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00216 ± 0.000152 per minute or 0.1296 ± 0.00914 per hour .
+This is equivalent to a doubling time of 320.9 ± 22.64 minutes.
+The correlation coefficient R is 0.99262
+The maximum OD is 0.2716.
+The lag time is 727.2 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S13
+7 points from 1400.0 through 1460.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00624 ± 0.000156 per minute or 0.3745 ± 0.00933 per hour .
+This is equivalent to a doubling time of 111.0 ± 2.77 minutes.
+The correlation coefficient R is 0.99845
+The maximum OD is 0.2082.
+The lag time is 1023.4 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S14
+5 points from 820.0 through 860.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00436 ± 0.00044 per minute or 0.2613 ± 0.02639 per hour .
+This is equivalent to a doubling time of 159.1 ± 16.07 minutes.
+The correlation coefficient R is 0.98505
+The maximum OD is 0.2081.
+The lag time is 775.0 minutes
+******************************************************************
+
+******************************************************************
+           Well w3_rep2_S16
+5 points from 1450.0 through 1490.0 minutes were  used to estimate the growth rate.
+The growth rate ± s.e. is 0.00729 ± 0.000273 per minute or 0.4375 ± 0.0164 per hour .
+This is equivalent to a doubling time of 95.0 ± 3.56 minutes.
+The correlation coefficient R is 0.9979
+The maximum OD is 0.2852.
+The lag time is 1095.7 minutes
+******************************************************************
+
