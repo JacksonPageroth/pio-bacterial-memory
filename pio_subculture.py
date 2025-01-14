@@ -1,321 +1,492 @@
-import numpy as np
-import polars as pl
-import subprocess
-import glob
+#!/usr/bin/env python3
+"""
+Pioreactor Growth Curves Analysis
+
+This script demonstrates how to:
+1. Unzip & rename CSVs for experiments.
+2. Merge experiment data and transform OD readings.
+3. Identify & filter subculture artifacts.
+4. Classify growth steps and plot data.
+5. Perform regression (growth rate) calculations.
+6. Optionally run external GrowthRates software (GRME).
+7. Optionally predict time to reach specified OD thresholds.
+
+Author: Your Name
+Date: 2025-01-13
+"""
+
 import os
+import glob
+import zipfile
+import subprocess
+
+import numpy as np
+import pandas as pd
+import polars as pl
+import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import seaborn as sns
-import zipfile
-import pandas as pd
+import statsmodels.formula.api as smf
+
+from adjustText import adjust_text
 from sklearn.linear_model import LinearRegression
 
 
 sns.set_theme(context="poster", style="white")
 
-
-def unzip_and_rename_csv(zip_file_path, extract_to_folder=None, renamed_csv="latest_od_data.csv"):
-    """
-    Unzips a file containing one CSV and renames it to a specified name.
-
-    Args:
-        zip_file_path (str): Path to the zip file.
-        extract_to_folder (str): Folder where files should be extracted.
-                                 Defaults to the same directory as the zip file.
-        renamed_csv (str): Desired name for the extracted CSV file.
-
-    Returns:
-        str: Path to the renamed CSV file.
-    """
-    if extract_to_folder is None:
-        extract_to_folder = os.path.dirname(zip_file_path)
-
-    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        # Extract all files
-        zip_ref.extractall(extract_to_folder)
-
-        # Identify the extracted CSV file
-        csv_file = None
-        for file_name in zip_ref.namelist():
-            if file_name.lower().endswith('.csv'):
-                csv_file = os.path.join(extract_to_folder, file_name)
-                break
-
-    # Check if a CSV file was found
-    if csv_file is None:
-        raise FileNotFoundError("No CSV file found in the ZIP archive.")
-
-    # Rename the CSV file
-    renamed_csv_path = os.path.join(extract_to_folder, renamed_csv)
-    os.rename(csv_file, renamed_csv_path)
-
-    return renamed_csv_path
-
-
-# Exp 1
-exp1 = unzip_and_rename_csv('./od_logs/exp1.zip', renamed_csv="exp1.csv")
-
-
-# Get the list of CSV files in the Downloads folder
-csv_files = glob.glob(os.path.expanduser('~/Downloads/*.csv'))
-
-if len(csv_files) == 0:
-    latest_csv = "./od_logs/latest_od_data.csv" #unzip_and_rename_csv('./od_logs/latest_od_data.zip')
-else:
-    # Find the most recent file based on modification time
-    latest_csv = max(csv_files, key=os.path.getmtime)
-
-
-# Merge the two experiments
-exp1 = pl.scan_csv(exp1).select("od_reading", "timestamp_localtime", "pioreactor_unit").rename({"od_reading": "OD600", "timestamp_localtime": "Time", "pioreactor_unit": "Unit"})
-df = pl.scan_csv(latest_csv).select("od_reading", "timestamp_localtime", "pioreactor_unit").rename({"od_reading": "OD600", "timestamp_localtime": "Time", "pioreactor_unit": "Unit"})
-df = pl.concat([df, exp1])
-
-# Dictionary to map 'Pioreactor name' to new values
-name_dict = {
-    #'worker 1': 'W1  - Replicate 3',
+###############################################################################
+# Global Config & Dictionaries
+###############################################################################
+NAME_DICT = {
+    # 'worker1': 'W1 - Replicate 3',
     'worker2': 'W2 - 35 ppt Control',
     'worker3': 'W3 - Replicate 1',
     'worker4': 'W4 - Replicate 2',
     'worker5': 'W5 - 55 ppt Control'
 }
 
-optimal_controls = ["W2 - 35 ppt Control"]
-stressed_controls = ["W5 - 55 ppt Control"]
-controls = ["W5 - 55 ppt Control", "W2 - 35 ppt Control"]
-replicates = ["W3 - Replicate 1", "W4 - Replicate 2"]
-
-# Define the corresponding transformations for each condition
-equations = {
-    #'W1  - Replicate 3': (0, 0),  # Not defined
+EQUATIONS = {
+    # 'W1  - Replicate 3': (0, 0),  # Not defined
     "W2 - 35 ppt Control": (1.348628103, 0.077),
-    "W3 - Replicate 1": (2.073660771, .077),
-    "W4 - Replicate 2": (2.204291876, .077),
-    "W5 - 55 ppt Control": (1.169484467, .077),
+    "W3 - Replicate 1": (2.073660771, 0.077),
+    "W4 - Replicate 2": (2.204291876, 0.077),
+    "W5 - 55 ppt Control": (1.169484467, 0.077),
 }
 
-threshold_od = 0.24  # Point after which we subculture
+THRESHOLD_OD = 0.24
+OPTIMAL_CONTROLS = ["W2 - 35 ppt Control"]
+STRESSED_CONTROLS = ["W5 - 55 ppt Control"]
+CONTROLS = ["W2 - 35 ppt Control", "W5 - 55 ppt Control"]
+REPLICATES = ["W3 - Replicate 1", "W4 - Replicate 2"]
 
-# Replace values in 'Pioreactor name' column using the dictionary
-df = df.with_columns(pl.col("Unit").replace_strict(name_dict))
+WEIRD_STEPS = {
+    "W2 - 35 ppt Control": [16, 18, 21],
+    "W3 - Replicate 1": [10, 16],
+    "W4 - Replicate 2": [11, 16],
+    "W5 - 55 ppt Control": [3, 10],
+}
 
-# Apply the equation
-a = pl.col("Unit").replace_strict(equations).list.first()
-b = pl.col("Unit").replace_strict(equations).list.last()
-df = df.with_columns((pl.col("OD600") * a + b))
-
-# Convert 'timestamp_localtime' to datetime format
-df = df.with_columns(pl.col("Time").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S"))
-
-# Filter subculture artifacts
-df = df.filter(pl.col("Time") >= pl.col("Time").min().dt.offset_by("5m"))
-
-# Filter out artifact
-df= df.with_columns((pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds()/3600).alias("Hours"))
-df = df.filter((pl.col("Unit").eq("W5 - 55 ppt Control") & pl.col("Hours").ge(104.2) & pl.col("Hours").le(104.4)).not_())
-
-df = df.sort("Unit", "Hours")
+COL_ORDER = ["W3 - Replicate 1", "W4 - Replicate 2", "W2 - 35 ppt Control", "W5 - 55 ppt Control"]
 
 
-# Take a rolling average in each step
-plot_df = df.with_columns(pl.col("Time").dt.truncate("10m").alias("Time"))
-plot_df = plot_df.group_by("Unit", "Time").agg(pl.col("OD600").mean().alias("Mean OD600"))
-plot_df = plot_df.with_columns((pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds()/3600).alias("Hours"))
-
-# Plotting the growth curves
-hue_order = ["W2 - 35 ppt Control", "W5 - 55 ppt Control", "W3 - Replicate 1", "W4 - Replicate 2"]
-
-f, ax = plt.subplots(figsize=(40, 7))
-sns.lineplot(data=plot_df.collect(streaming=True).to_pandas(), x="Time", y="Mean OD600", hue="Unit", hue_order=hue_order, markersize=8,
-             sizes=(1, 8), ax=ax, palette=["blue", "red", "green", "mediumseagreen"])
-
-plt.axhline(y=threshold_od, color='black', linestyle='--')
-# Set major ticks to every 6 hours
-ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%H"))
-ax.set_xlabel("Time")
-
-# Create a secondary x-axis for date display
-secax = ax.secondary_xaxis(-0.1)
-secax.xaxis.set_major_locator(mdates.DayLocator())
-secax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
-secax.set_xlabel("Date")
-ax.set_title('Pioreactor Transformed OD Curves')
-plt.grid(True)
-plt.show()
-
-
-def find_steps(class_df, shift):
-    # Condition for incrementing 'step'
-    class_df = class_df.sort("Unit", "Hours")
-    step_cond = (pl.col("OD600").shift(shift) - pl.col("OD600") > 0.03)
-
-    # Use cumulative sum over the 'step_condition' to increment each time it's True
-    class_df = class_df.with_columns(pl.when(step_cond).then(1).otherwise(0).cum_sum().add(1).over(pl.col("Unit")).alias("Step"))
-
-    # Add condition to the ldf
-    class_df = class_df.with_columns(pl.when((pl.col("Step") % 2 == 1) & (pl.col("Unit").is_in(replicates)))
-                         .then(pl.lit("Optimal"))
-                         .otherwise(pl.when((pl.col("Step") % 2 == 0) & (pl.col("Unit").is_in(replicates)))
-                                    .then(pl.lit("Stressed"))
-                                    .otherwise(pl.when(pl.col("Unit").is_in(stressed_controls))
-                                               .then(pl.lit("Stressed"))
-                                               .otherwise(pl.when(pl.col("Unit").is_in(optimal_controls))
-                                                          .then(pl.lit("Optimal")))))
-                         .alias("Condition"))
-
-    return class_df
-
-# Find steps
-df = find_steps(df, 5)
-
-# Discard the first and last 5 points in every step (because of subculture spike)
-filter_points = 20
-df = df.with_columns(pl.cum_count("OD600").over("Unit", "Step").alias("index")).filter(pl.col("index") > filter_points)
-df = df.filter(pl.col("index") < pl.col("index").max() - filter_points).drop("index")
-
-# Redo step classification
-df = df.drop("Step", "Condition")
-df = find_steps(df, 1)
-
-# Rename condition to salinity
-df = df.rename({"Condition": "Salinity"})
-
-# Plotting the growth curves using the new 'Transformed OD' column
-col_order = ["W3 - Replicate 1", "W4 - Replicate 2", "W2 - 35 ppt Control", "W5 - 55 ppt Control"]
-g = sns.relplot(x="Hours", y="OD600", hue="Salinity", style="Step", col="Unit", col_wrap=2, col_order=col_order, height=10,
-             markersize=8, data=df.collect(streaming=True).to_pandas(), kind="line", hue_order=["Optimal", "Stressed"], palette=["blue", "red"])
-
-for ax in g.axes.flatten():
-    ax.axhline(y=threshold_od, color='black', linestyle='--')
-g.fig.suptitle('Pioreactor OD Curves')
-plt.show()
-
-
-# Filter out weird steps
-weird_steps = {"W2 - 35 ppt Control": [16, 18, 21],
-               "W3 - Replicate 1": [10, 16],
-               "W4 - Replicate 2": [11, 16],
-               "W5 - 55 ppt Control": [3, 10]}
-df = df.filter(*[~((pl.col("Unit") == unit) & pl.col("Step").is_in(steps)) for unit, steps in weird_steps.items()])
-
-# Average data in 10 minute bins
-mean_df = df.with_columns(pl.col("Time").dt.truncate("10m").alias("Time"))
-mean_df = mean_df.group_by("Unit", "Time", "Salinity", "Step").agg(pl.col("OD600").mean().alias("Mean OD600"))
-mean_df = mean_df.with_columns((pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds()/3600).alias("Hours"))
-mean_df = mean_df.with_columns(pl.col("Mean OD600").log().alias("ln(Mean OD600)")).collect()
-
-# Plotting the growth curves using the new 'Transformed OD' column
-col_order = ["W3 - Replicate 1", "W4 - Replicate 2", "W2 - 35 ppt Control", "W5 - 55 ppt Control"]
-g = sns.relplot(x="Hours", y="Mean OD600", hue="Salinity", style="Step", col="Unit", col_wrap=2, col_order=col_order, height=10, markers=True,
-             markersize=8, data=mean_df.to_pandas(), kind="line", hue_order=["Optimal", "Stressed"], palette=["blue", "red"])
-
-for ax in g.axes.flatten():
-    ax.axhline(y=threshold_od, color='black', linestyle='--')
-g.fig.suptitle('Pioreactor binned OD Curves')
-plt.show()
-
-# Plotting the growth curves using the new 'Transformed OD' column
-col_order = ["W3 - Replicate 1", "W4 - Replicate 2", "W2 - 35 ppt Control", "W5 - 55 ppt Control"]
-g = sns.relplot(x="Hours", y="ln(Mean OD600)", hue="Salinity", style="Step", col="Unit", col_wrap=2, col_order=col_order, height=10, markers=True,
-             markersize=8, data=mean_df.to_pandas(), kind="line", hue_order=["Optimal", "Stressed"], palette=["blue", "red"])
-
-for ax in g.axes.flatten():
-    ax.axhline(y=np.log(threshold_od), color='black', linestyle='--')
-g.fig.suptitle('Pioreactor binned ln(OD) Curves')
-plt.show()
-
-
-def plot_fit_with_selected_points(ldf, unit, step, slope, intercept, selected_indices, significant, lag_point):
+###############################################################################
+# Data I/O Functions
+###############################################################################
+def unzip_and_rename_csv(zip_file_path, extract_to_folder=None, renamed_csv="latest_od_data.csv"):
     """
-    Plot the original data with the line fit and highlight the points used for slope calculation.
-    Additionally, plot a line fitted to the first 10 points, extend it to the intersection with the main fitted line,
-    and annotate the intersection point.
+    Unzips a file containing one CSV and renames it to a specified name.
+    """
+    if extract_to_folder is None:
+        extract_to_folder = os.path.dirname(zip_file_path)
 
-    Parameters:
-        ldf (pd.DataFrame): Input DataFrame with columns 'Unit', 'Step', 'Hours', and 'ln(Mean OD600)'.
-        unit (str): The unit to plot.
-        step (str): The step to plot.
-        slope (float): Slope of the fitted line.
-        intercept (float): Intercept of the fitted line.
-        selected_indices (list): Indices of points used for the slope calculation.
-        significant (float): R^2 value of the fitted line.
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to_folder)
+        csv_file = None
+        for file_name in zip_ref.namelist():
+            if file_name.lower().endswith('.csv'):
+                csv_file = os.path.join(extract_to_folder, file_name)
+                break
+
+    if csv_file is None:
+        raise FileNotFoundError("No CSV file found in the ZIP archive.")
+
+    renamed_csv_path = os.path.join(extract_to_folder, renamed_csv)
+    os.rename(csv_file, renamed_csv_path)
+    return renamed_csv_path
+
+
+def load_data_for_exp1() -> str:
+    """
+    Unzip the exp1 data into 'exp1.csv'.
 
     Returns:
-        None: Displays the plot.
+        str: Path to the CSV file for Exp1.
     """
-    # Filter the data for the specified Unit and Step
+    return unzip_and_rename_csv('./od_logs/exp1.zip', renamed_csv="exp1.csv")
+
+
+def find_latest_download_csv() -> str:
+    """
+    Find the most recent .csv in ~/Downloads, or default to './od_logs/latest_od_data.csv'.
+    """
+    csv_files = glob.glob(os.path.expanduser('~/Downloads/*.csv'))
+    if len(csv_files) == 0:
+        return "./od_logs/latest_od_data.csv"
+    else:
+        return max(csv_files, key=os.path.getmtime)
+
+
+###############################################################################
+# Data Preparation
+###############################################################################
+def merge_experiments(exp1_csv: str, latest_csv: str) -> pl.LazyFrame:
+    """
+    Read and merge two experimental CSV files via Polars lazy scanning.
+    """
+    exp1_lf = (
+        pl.scan_csv(exp1_csv)
+        .select("od_reading", "timestamp_localtime", "pioreactor_unit")
+        .rename({"od_reading": "OD600", "timestamp_localtime": "Time", "pioreactor_unit": "Unit"})
+    )
+
+    df_latest_lf = (
+        pl.scan_csv(latest_csv)
+        .select("od_reading", "timestamp_localtime", "pioreactor_unit")
+        .rename({"od_reading": "OD600", "timestamp_localtime": "Time", "pioreactor_unit": "Unit"})
+    )
+
+    return pl.concat([exp1_lf, df_latest_lf])
+
+
+def transform_data(df: pl.LazyFrame) -> pl.DataFrame:
+    """
+    - Rename Pioreactor units
+    - Apply OD600 transformations
+    - Convert time to datetime
+    - Filter subculture artifacts
+    - Compute 'Hours' since start
+    - Remove a known artifact
+    - Sort data by Unit, Hours
+
+    Returns:
+        pl.DataFrame: Eager DataFrame with transformations applied.
+    """
+    df = df.with_columns(pl.col("Unit").replace_strict(NAME_DICT))
+
+    # Apply the equation
+    a = pl.col("Unit").replace_strict(EQUATIONS).list.first()
+    b = pl.col("Unit").replace_strict(EQUATIONS).list.last()
+    df = df.with_columns((pl.col("OD600") * a + b))
+
+    # Convert Time to datetime
+    df = df.with_columns(pl.col("Time").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S"))
+
+    # Filter subculture artifacts (first 5 min)
+    df = df.filter(pl.col("Time") >= pl.col("Time").min().dt.offset_by("5m"))
+
+    # Hours since start
+    df = df.with_columns(
+        (pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds() / 3600).alias("Hours")
+    )
+
+    # Remove known artifact for W5 - 55 ppt Control
+    df = df.filter(
+        (
+            pl.col("Unit").eq("W5 - 55 ppt Control")
+            & pl.col("Hours").ge(104.2)
+            & pl.col("Hours").le(104.4)
+        ).not_()
+    )
+
+    df = df.sort(["Unit", "Hours"])
+    return df.collect()
+
+
+###############################################################################
+# Plotting
+###############################################################################
+def plot_10min_bins(df: pl.DataFrame) -> None:
+    """
+    Take a rolling average in 10m bins and plot growth curves.
+    """
+    plot_df = (
+        df.with_columns(pl.col("Time").dt.truncate("10m").alias("Time"))
+        .group_by("Unit", "Time")
+        .agg(pl.col("OD600").mean().alias("Mean OD600"))
+        .with_columns(
+            (pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds() / 3600).alias("Hours")
+        )
+    )
+
+    hue_order = ["W2 - 35 ppt Control", "W5 - 55 ppt Control", "W3 - Replicate 1", "W4 - Replicate 2"]
+    f, ax = plt.subplots(figsize=(40, 7))
+    sns.lineplot(
+        data=plot_df.to_pandas(),
+        x="Time",
+        y="Mean OD600",
+        hue="Unit",
+        hue_order=hue_order,
+        markersize=8,
+        sizes=(1, 8),
+        ax=ax,
+        palette=["blue", "red", "green", "mediumseagreen"],
+    )
+
+    plt.axhline(y=THRESHOLD_OD, color='black', linestyle='--')
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H"))
+    ax.set_xlabel("Time")
+
+    # Secondary date axis
+    secax = ax.secondary_xaxis(-0.1)
+    secax.xaxis.set_major_locator(mdates.DayLocator())
+    secax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    secax.set_xlabel("Date")
+
+    ax.set_title('Pioreactor Transformed OD Curves')
+    plt.grid(True)
+    plt.show()
+
+
+###############################################################################
+# Step Classification
+###############################################################################
+def find_steps(class_df: pl.DataFrame, shift: int) -> pl.DataFrame:
+    """
+    Increment 'Step' each time there's a drop > 0.03 (indicating subculture).
+    Then classify as 'Optimal' or 'Stressed' depending on replicate or control.
+    """
+    class_df = class_df.sort(["Unit", "Hours"])
+    step_cond = (pl.col("OD600").shift(shift) - pl.col("OD600") > 0.03)
+
+    class_df = class_df.with_columns(
+        pl.when(step_cond)
+        .then(1)
+        .otherwise(0)
+        .cum_sum()
+        .add(1)
+        .over(pl.col("Unit"))
+        .alias("Step")
+    )
+
+    # Map odd/even steps to "Optimal"/"Stressed" for REPLICATES
+    class_df = class_df.with_columns(
+        pl.when(
+            (pl.col("Step") % 2 == 1) & (pl.col("Unit").is_in(REPLICATES))
+        )
+        .then(pl.lit("Optimal"))
+        .otherwise(
+            pl.when(
+                (pl.col("Step") % 2 == 0) & (pl.col("Unit").is_in(REPLICATES))
+            )
+            .then(pl.lit("Stressed"))
+            .otherwise(
+                pl.when(pl.col("Unit").is_in(STRESSED_CONTROLS))
+                .then(pl.lit("Stressed"))
+                .otherwise(
+                    pl.when(pl.col("Unit").is_in(OPTIMAL_CONTROLS))
+                    .then(pl.lit("Optimal"))
+                )
+            )
+        )
+        .alias("Condition")
+    )
+    return class_df
+
+
+def classify_steps(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    1) Classify steps with shift=5, discard first/last 20 points from each step.
+    2) Re-classify with shift=1, rename 'Condition' -> 'Salinity'.
+    """
+    df = find_steps(df, shift=5)
+
+    # Discard the first and last 20 points in every step
+    filter_points = 20
+    df = (
+        df.with_columns(pl.cum_count("OD600").over(["Unit", "Step"]).alias("index"))
+        .filter(pl.col("index") > filter_points)
+        .filter(pl.col("index") < pl.col("index").max().over(["Unit", "Step"]) - filter_points)
+        .drop("index")
+    )
+
+    # Re-classify after trimming
+    df = df.drop(["Step", "Condition"])
+    df = find_steps(df, shift=1)
+    df = df.rename({"Condition": "Salinity"})
+    return df
+
+
+def plot_classified_steps(df: pl.DataFrame) -> None:
+    """
+    Plot the new 'OD600' vs Hours with steps labeled as Optimal / Stressed.
+    """
+    g = sns.relplot(
+        x="Hours",
+        y="OD600",
+        hue="Salinity",
+        style="Step",
+        col="Unit",
+        col_wrap=2,
+        col_order=COL_ORDER,
+        height=10,
+        markersize=8,
+        data=df.to_pandas(),
+        kind="line",
+        hue_order=["Optimal", "Stressed"],
+        palette=["blue", "red"],
+    )
+
+    for ax in g.axes.flatten():
+        ax.axhline(y=THRESHOLD_OD, color='black', linestyle='--')
+    g.fig.suptitle('Pioreactor OD Curves')
+    plt.show()
+
+
+###############################################################################
+# Filtering Weird Steps & Binning
+###############################################################################
+def filter_weird_steps(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Remove steps that have been identified as outliers/weird from the analysis.
+    """
+    return df.filter(
+        *[
+            ~((pl.col("Unit") == unit) & pl.col("Step").is_in(steps))
+            for unit, steps in WEIRD_STEPS.items()
+        ]
+    )
+
+
+def bin_data(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Bin data in 10-minute increments, compute Mean OD600, then log-transform.
+    """
+    mean_df = (
+        df.with_columns(pl.col("Time").dt.truncate("10m").alias("Time"))
+        .group_by("Unit", "Time", "Salinity", "Step")
+        .agg(pl.col("OD600").mean().alias("Mean OD600"))
+        .with_columns(
+            (pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds() / 3600).alias("Hours")
+        )
+        .with_columns(pl.col("Mean OD600").log().alias("ln(Mean OD600)"))
+    )
+    return mean_df
+
+
+def plot_binned_data(mean_df: pl.DataFrame) -> None:
+    """
+    Plot the binned Mean OD600 and ln(Mean OD600).
+    """
+    # Plot binned OD
+    g = sns.relplot(
+        x="Hours",
+        y="Mean OD600",
+        hue="Salinity",
+        style="Step",
+        col="Unit",
+        col_wrap=2,
+        col_order=COL_ORDER,
+        height=10,
+        markers=True,
+        markersize=8,
+        data=mean_df.to_pandas(),
+        kind="line",
+        hue_order=["Optimal", "Stressed"],
+        palette=["blue", "red"],
+    )
+    for ax in g.axes.flatten():
+        ax.axhline(y=THRESHOLD_OD, color='black', linestyle='--')
+    g.fig.suptitle('Pioreactor binned OD Curves')
+    plt.show()
+
+    # Plot binned ln(OD)
+    g = sns.relplot(
+        x="Hours",
+        y="ln(Mean OD600)",
+        hue="Salinity",
+        style="Step",
+        col="Unit",
+        col_wrap=2,
+        col_order=COL_ORDER,
+        height=10,
+        markers=True,
+        markersize=8,
+        data=mean_df.to_pandas(),
+        kind="line",
+        hue_order=["Optimal", "Stressed"],
+        palette=["blue", "red"],
+    )
+    for ax in g.axes.flatten():
+        ax.axhline(y=np.log(THRESHOLD_OD), color='black', linestyle='--')
+    g.fig.suptitle('Pioreactor binned ln(OD) Curves')
+    plt.show()
+
+
+###############################################################################
+# Regression & Plots
+###############################################################################
+def plot_fit_with_selected_points(
+    ldf: pd.DataFrame,
+    unit: str,
+    step: str,
+    slope: float,
+    intercept: float,
+    selected_indices: list,
+    significant: float,
+    lag_point: tuple,
+):
+    """
+    Plot original data with the line fit and highlight points used for slope calculation.
+    Also show a horizontal line for the lag and intersection point.
+    """
     group = ldf[(ldf['Unit'] == unit) & (ldf['Step'] == step)].sort_values('Hours')
     x = group['Hours'].values
     y = group['ln(Mean OD600)'].values
-    intersection_x, intersection_y = lag_point
-    intersection_x += x[0]  # Lag was given in absolute amount, we want relative to start
 
-    # Get the coordinates for point along the lag line
+    intersection_x, intersection_y = lag_point
+    intersection_x += x[0]  # shift to absolute hours
+
+    # Horizontal lag line
     x_lag_fit = np.linspace(x.min(), x.max(), 100)
     y_lag_fit = np.full_like(x_lag_fit, intersection_y)
 
-    # Get the X for the exp fit line, and corresponding Ys from model
+    # Exponential fit line
     x_fit = np.linspace(x.min(), x.max(), 100)
     x_fit = x_fit[x_fit >= intersection_x - 1]
     y_fit = slope * x_fit + intercept
 
-    # Plot original data
     plt.figure(figsize=(10, 6))
     plt.scatter(x, y, label="Original Data", color="gray", alpha=0.7)
 
-    # Highlight selected points
     selected_points = group.iloc[selected_indices]
-    plt.scatter(selected_points['Hours'], selected_points['ln(Mean OD600)'],
-                label="Selected Points", color="orange", edgecolor="black", zorder=5)
+    plt.scatter(
+        selected_points['Hours'],
+        selected_points['ln(Mean OD600)'],
+        label="Selected Points",
+        color="orange",
+        edgecolor="black",
+        zorder=5
+    )
 
-    # Plot the exp fit line and lag line
     plt.plot(x_fit, y_fit, label=f"Main Fitted Line (Slope={slope:.2f})", color="blue", linewidth=2)
     plt.plot(x_lag_fit, y_lag_fit, label="Lag fit", color="green", linestyle="--", linewidth=2)
 
-    # Mark the intersection point
-    plt.scatter([intersection_x], [intersection_y], color="red", zorder=10, label=f"Intersection (x={intersection_x:.2f})")
+    # Mark intersection
+    plt.scatter([intersection_x], [intersection_y], color="red", zorder=10,
+                label=f"Intersection (x={intersection_x:.2f})")
     plt.axvline(x=intersection_x, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Add labels, legend, and title
     plt.xlabel("Hours")
     plt.ylabel("ln(Mean OD600)")
-
     plt.title(f"Unit: {unit}, Step: {step}, R2 {significant:.2f}")
     plt.legend()
     plt.grid(alpha=0.3)
     plt.tight_layout()
-
-    # Show the plot
     plt.show()
 
 
-
-def calculate_step_slopes_and_r2(df, window_length=6):
+def calculate_step_slopes_and_r2(df: pl.DataFrame, window_length=6) -> pd.DataFrame:
     """
-    Calculate the slope and R^2 for each step in the given Polars DataFrame, considering only points where the slope
-    over a rolling window of 6 is within 95% of the maximum slope obtained by that rolling window.
-
-    Parameters:
-        df (pl.DataFrame): Input Polars DataFrame with columns 'Unit', 'Step', 'Hours', and 'ln(Mean OD600)'.
+    Calculate slope & R^2 for each step in Polars DataFrame:
+      - Identify subset of points where rolling slope >= 95% of max rolling slope.
+      - Fit linear regression to that subset, compute slope & R^2.
+      - Estimate lag time (store it), but do NOT plot within this function.
 
     Returns:
-        pd.DataFrame: A pandas DataFrame with columns 'Unit', 'Step', 'Slope', and 'R2'.
+        pd.DataFrame: Columns 'Unit', 'Step', 'Slope', 'R2', 'Points', 'Salinity',
+                      'Significant', 'Lag', 'SelectedIndices' (for optional plotting).
     """
-    # Convert Polars DataFrame to Pandas for processing
-    df = df.to_pandas()
-
+    pdf = df.to_pandas()
     results = []
 
-    # Group by Unit and Step
-    grouped = df.groupby(['Unit', 'Step'])
-
+    grouped = pdf.groupby(['Unit', 'Step'])
     for (unit, step), group in grouped:
         group = group.sort_values('Hours')
         x = group['Hours'].values
         y = group['ln(Mean OD600)'].values
 
-        # Calculate rolling slopes over a window
+        # Calculate rolling slopes
         rolling_slopes = []
         for i in range(len(x) - (window_length - 1)):
             x_window = x[i:i + window_length].reshape(-1, 1)
@@ -323,51 +494,85 @@ def calculate_step_slopes_and_r2(df, window_length=6):
             model = LinearRegression().fit(x_window, y_window)
             rolling_slopes.append(model.coef_[0])
 
-        # Pad the rolling slopes with NaN to match the original length
         group['Rolling Slope'] = rolling_slopes + [np.nan] * (window_length - 1)
         group.reset_index(drop=True, inplace=True)
 
-        # Filter points where the rolling slope is within 95% of the max rolling slope
-        max_slope = np.nanmax(rolling_slopes)
+        max_slope = np.nanmax(rolling_slopes) if rolling_slopes else 0
         matching_indices = group.index[group['Rolling Slope'] >= 0.95 * max_slope].tolist()
 
-        # Include the 5 next rows for each matching point
+        # Include up to window_length rows after each match
         expanded_indices = set()
         for idx in matching_indices:
             expanded_indices.update(range(idx, min(idx + window_length, len(x))))
 
         slope_points = group.loc[list(expanded_indices)].sort_values("Hours")
-
-        if len(slope_points) > 1:  # Ensure there are enough points for regression
+        if len(slope_points) > 1:
             x_filtered = slope_points['Hours'].values.reshape(-1, 1)
             y_filtered = slope_points['ln(Mean OD600)'].values
             model = LinearRegression().fit(x_filtered, y_filtered)
             slope = model.coef_[0]
             r2 = model.score(x_filtered, y_filtered)
 
-            # Get the lag time
+            # Calculate lag
             first_point_y = group.iloc[0]['ln(Mean OD600)']
-            lag_time = ((group.iloc[0]['ln(Mean OD600)'] - model.intercept_) / slope) - group.iloc[0]['Hours']
+            lag_time = ((first_point_y - model.intercept_) / slope) - group.iloc[0]['Hours']
             lag_point = (lag_time, first_point_y)
 
-            # Plot the data with fit
-            plot_fit_with_selected_points(df, unit, step, slope, model.intercept_, slope_points.index.tolist(), r2, lag_point)
+            # Instead of plotting here, store the indices for optional plotting
+            selected_indices = slope_points.index.tolist()
 
-            results.append({'Unit': unit, 'Step': step, 'Slope': slope, 'R2': r2, 'Points': len(group), 'Salinity': group['Salinity'].values[0], 'Significant': r2 > 0.95, "Lag": lag_time})
+            results.append({
+                'Unit': unit,
+                'Step': step,
+                'Slope': slope,
+                'R2': r2,
+                'Points': len(group),
+                'Salinity': group['Salinity'].values[0],
+                'Significant': r2 > 0.95,
+                'Lag': lag_time,
+                'Intercept': model.intercept_,
+                'SelectedIndices': selected_indices,
+            })
 
-    # Convert results to DataFrame
     return pd.DataFrame(results)
 
 
-def plot_rolling_slopes(df, window=6):
+def plot_selected_fits(slopes_and_r2: pd.DataFrame, original_df: pd.DataFrame) -> None:
     """
-    Plot rolling slopes for the given DataFrame.
+    Using the results from calculate_step_slopes_and_r2 (including 'SelectedIndices'),
+    plot the original data with the fits for each row in slopes_and_r2.
+    """
+    for _, row in slopes_and_r2.iterrows():
+        unit = row["Unit"]
+        step = row["Step"]
+        slope = row["Slope"]
+        intercept = row["Intercept"]
+        r2 = row["R2"]
+        selected_indices = row["SelectedIndices"]
+        lag_time = row["Lag"]
+        first_point_y = original_df[
+            (original_df["Unit"] == unit) & (original_df["Step"] == step)
+        ].sort_values("Hours")["ln(Mean OD600)"].iloc[0]
 
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with columns 'Unit', 'Step', 'Hours', and 'ln(Mean OD600)'.
-        window (int): Rolling window size for slope calculation.
+        # Create a lag_point tuple for the intersection
+        lag_point = (lag_time, first_point_y)
+
+        plot_fit_with_selected_points(
+            original_df,
+            unit,
+            step,
+            slope,
+            intercept,
+            selected_indices,
+            r2,
+            lag_point
+        )
+
+
+def plot_rolling_slopes(df: pd.DataFrame, window=6) -> None:
     """
-    # Calculate rolling slopes for each Unit and Step
+    Calculate and plot rolling slopes for each Unit, Step.
+    """
     rolling_slopes = []
     grouped = df.groupby(['Unit', 'Step'])
 
@@ -383,68 +588,182 @@ def plot_rolling_slopes(df, window=6):
             model = LinearRegression().fit(x_window, y_window)
             slopes.append(model.coef_[0])
 
-        slopes = [np.nan] * (window - 1) + slopes  # Pad to match the length
+        slopes = [np.nan] * (window - 1) + slopes
         group['Rolling Slope'] = slopes
         rolling_slopes.append(group)
 
     rolling_slopes_df = pd.concat(rolling_slopes)
 
-    # Plot
-    g = sns.relplot(x="Hours", y="Rolling Slope", col="Unit", col_wrap=2, hue="Salinity", data=rolling_slopes_df, col_order=col_order, height=10, markers=True)
+    g = sns.relplot(
+        x="Hours",
+        y="Rolling Slope",
+        col="Unit",
+        col_wrap=2,
+        hue="Salinity",
+        data=rolling_slopes_df,
+        col_order=COL_ORDER,
+        height=10,
+        markers=True
+    )
     g.fig.suptitle("Rolling Slopes")
     plt.show()
 
 
-# Individual fits
-window = 10
-slopes_and_r2 = calculate_step_slopes_and_r2(mean_df, window_length=window)
+def plot_robust_max_slopes_and_lag(
+    slopes_and_r2,
+    hue_order=("Optimal", "Stressed"),
+    palette=("blue", "red"),
+    slope_title="Slopes",
+    lag_title="Lag times",
+    fontsize=30
+):
+    """
+    Plots two lmplot figures:
+      1) Slope vs. Step (Robust RLM)
+      2) Lag vs. Step (Robust RLM)
+    """
+    # 1) PLOT SLOPE VS STEP
+    slope_grid = sns.lmplot(
+        x="Step",
+        y="Slope",
+        hue="Salinity",
+        col="Unit",
+        col_wrap=2,
+        data=slopes_and_r2,
+        height=10,
+        col_order=COL_ORDER,
+        hue_order=hue_order,
+        palette=palette,
+        robust=True,   # Seaborn's 'robust' is not the same as statsmodels RLM
+        scatter_kws={"s": 50},
+        line_kws={"lw": 2},
+    )
+    slope_grid.fig.suptitle(slope_title)
+    slope_grid.set_axis_labels("Step", "Slope (1/hour)")
 
-# Rolling slope
-plot_rolling_slopes(mean_df.to_pandas(), window=window)
+    # 2) PLOT LAG VS STEP
+    lag_grid = sns.lmplot(
+        x="Step",
+        y="Lag",
+        hue="Salinity",
+        col="Unit",
+        col_wrap=2,
+        data=slopes_and_r2,
+        height=10,
+        col_order=COL_ORDER,
+        hue_order=hue_order,
+        palette=palette,
+        robust=True,  # again, just a hint to Seaborn
+        scatter_kws={"s": 50},
+        line_kws={"lw": 2},
+    )
+    lag_grid.fig.suptitle(lag_title)
+    lag_grid.set_axis_labels("Step", "Lag time (Hours)")
 
-# Plot
-g = sns.relplot(x="Step", y="Slope", hue="Salinity", col="Unit", col_wrap=2, style="Significant", col_order=col_order, height=10, markers=True,
-            data=slopes_and_r2, kind="line", hue_order=["Optimal", "Stressed"], palette=["blue", "red"])
-g.fig.suptitle("Slopes")
-plt.show()
+    # Annotate both slope and lag figures
+    for fig in [slope_grid, lag_grid]:
+        # Each facet is an Axes object
+        for ax in fig.axes.flat:
+            title = ax.get_title()
+            # e.g. "Unit = W3 - Replicate 1"
+            unit_value = title.split(" = ")[-1].strip()
 
-g = sns.relplot(x="Step", y="Lag", hue="Salinity", col="Unit", col_wrap=2, style="Significant", col_order=col_order, height=10, markers=True,
-            data=slopes_and_r2, kind="line", hue_order=["Optimal", "Stressed"], palette=["blue", "red"])
-plt.ylabel("Lag time (hours)")
-g.fig.suptitle("Lag times")
-plt.show()
+            # We'll collect all annotation text objects for this Axes here
+            text_objs = []
+
+            color_map = dict(zip(hue_order, palette))
+
+            # We’ll place them near the median Step in data coordinates
+            for sal in hue_order:
+                subset = slopes_and_r2[(slopes_and_r2["Unit"] == unit_value) & (slopes_and_r2["Salinity"] == sal)]
+                if subset.shape[0] < 2:
+                    continue  # Not enough points for regression
+
+                # Choose the formula depending on which figure we're annotating
+                if fig == slope_grid:
+                    model = smf.rlm("Slope ~ Step", data=subset).fit()
+                else:
+                    model = smf.rlm("Lag ~ Step", data=subset).fit()
+
+                slope = model.params["Step"]
+                intercept = model.params["Intercept"]
+                p_value = model.pvalues["Step"]
+
+                annot_text = (
+                    f"{sal}: y = {slope:.2g}x + {intercept:.2g}\n"
+                    f"p = {p_value:.2g}"
+                )
+
+                # We'll place the text near the median Step
+                x_point = subset["Step"].median()
+                # For consistency, compute the y_point from the regression line
+                y_point = intercept + slope * x_point
+
+                # Create the annotation text object in data coords
+                t = ax.annotate(
+                    annot_text,
+                    (x_point, y_point),
+                    fontsize=fontsize,
+                    color=color_map[sal],
+                )
+                text_objs.append(t)
+
+            # Now that all text objects are created for this Axes,
+            # we call adjust_text to nudge them around if needed
+            adjust_text(
+                text_objs,
+                ax=ax,
+                force_text=0.8,
+                force_points=0.2,
+            )
+
+    plt.show()
 
 
-def do_grme():
-    # Paths and configurations
+###############################################################################
+# GrowthRates (GRME) Integration & Prediction
+###############################################################################
+def do_grme(mean_df: pl.DataFrame) -> None:
+    """
+    Optionally run external GrowthRates software on mean_df data, then plot summary.
+    """
     GROWTH_RATES_EXEC_PATH = '/Applications/GrowthRates_6.2.1/GrowthRates'
     OUTPUT_DIR = './grme/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Generate worker-specific data and process GrowthRates
     for worker in mean_df.get_column("Unit").unique().to_list():
         worker_file = os.path.join(OUTPUT_DIR, f"{worker}.txt")
 
-        # Get the minute within each step
-        worker_df = mean_df.filter(pl.col("Unit").eq(worker)).with_columns((pl.col("Hours") * 6).round().mul(10).cast(pl.Int64).alias("Min"))
-        worker_df = worker_df.with_columns(pl.col("Min").sub(pl.col("Min").min()).over("Step"))
+        worker_df = (
+            mean_df.filter(pl.col("Unit") == worker)
+            .with_columns((pl.col("Hours") * 6).round().mul(10).cast(pl.Int64).alias("Min"))
+            .with_columns(pl.col("Min").sub(pl.col("Min").min()).over("Step"))
+        )
 
-        # Pivot data for this step
+        # Convert ln(Mean OD600) back to OD
         worker_df = worker_df.pivot(index="Min", on="Step", values="ln(Mean OD600)").sort("Min")
         worker_df = worker_df.with_columns(pl.col("*").exclude("Min").exp())
 
-        # Aggregate the data for each minute, and remove nulls
+        # Aggregate
         worker_df = worker_df.group_by("Min").agg(pl.col("*").exclude("Min").max())
         worker_df = worker_df.with_columns(pl.col("*").exclude("Min").forward_fill())
 
-        # Rename the column to append the worker name as a suffix
-        worker_df = worker_df.rename({col: f"{worker}_{col}" for col in worker_df.columns if col != "Min"})
+        # Rename
+        worker_df = worker_df.rename({
+            col: f"{worker}_{col}" for col in worker_df.columns if col != "Min"
+        })
         worker_df.write_csv(worker_file, separator='\t')
 
         # Run GrowthRates
         try:
             command = [GROWTH_RATES_EXEC_PATH, "-i", os.path.relpath(worker_file), "-b", "0.077"]
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
             stdout, stderr = process.communicate(input="1\nY\n")
             if process.returncode == 0:
                 print(f"Successfully processed {worker}:\n{stdout}")
@@ -455,33 +774,46 @@ def do_grme():
 
     # Visualization
     fig, ax = plt.subplots(figsize=(20, 12))
-
-    palette = {'W2 - 35 ppt Control': "blue", 'W5 - 55 ppt Control': "red", 'W3 - Replicate 1': "green", 'W4 - Replicate 2': "mediumseagreen"}
-    replicates = ['W3 - Replicate 1', 'W4 - Replicate 2']
-    controls = ['W2 - 35 ppt Control', 'W5 - 55 ppt Control']
+    palette = {
+        'W2 - 35 ppt Control': "blue",
+        'W5 - 55 ppt Control': "red",
+        'W3 - Replicate 1': "green",
+        'W4 - Replicate 2': "mediumseagreen"
+    }
 
     for filepath in glob.glob(os.path.expanduser('grme/*.summary')):
-        temp_df = pd.read_csv(filepath, sep='\t', header=2, usecols=['Well', 'min', 'hours', 'R', 'Max OD', 'lag time (minutes)'])
+        temp_df = pd.read_csv(
+            filepath,
+            sep='\t',
+            header=2,
+            usecols=['Well', 'min', 'hours', 'R', 'Max OD', 'lag time (minutes)']
+        )
         temp_df.rename(columns={'hours': 'Growth Rate (1/hours)'}, inplace=True)
         unit_name = os.path.basename(filepath).split('.')[0]
 
-        sns.lineplot(data=temp_df, x=temp_df.index, y='Growth Rate (1/hours)', ax=ax, color=palette[unit_name], label=unit_name)
+        sns.lineplot(
+            data=temp_df,
+            x=temp_df.index,
+            y='Growth Rate (1/hours)',
+            ax=ax,
+            color=palette.get(unit_name, "black"),
+            label=unit_name
+        )
 
-        # Add best-fit lines
+        # Best-fit lines
         x = temp_df.index
         y = temp_df['Growth Rate (1/hours)']
-        if unit_name in replicates:
+        if unit_name in ['W3 - Replicate 1', 'W4 - Replicate 2']:
+            # Sub-logic: e.g. fit odd/even steps
             if len(x[::2]) > 1:
                 m, b = np.polyfit(x[::2], y[::2], 1)
-                ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed', label=f'{unit_name} 35 fit')
-
+                ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed')
             if len(x[1::2]) > 1:
                 m, b = np.polyfit(x[1::2], y[1::2], 1)
-                ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed', label=f'{unit_name} 55 fit')
-
-        elif unit_name in controls and len(x) > 1:
+                ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed')
+        elif unit_name in ['W2 - 35 ppt Control', 'W5 - 55 ppt Control'] and len(x) > 1:
             m, b = np.polyfit(x, y, 1)
-            ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed', label=f'{unit_name} fit')
+            ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed')
 
     plt.xlabel('Step Number')
     plt.ylabel('Growth Rate (1/hours)')
@@ -491,25 +823,96 @@ def do_grme():
     plt.show()
 
 
-def predict_threshold_time(equations: dict, df: pl.DataFrame, predict_od: int):
+def predict_threshold_time(equations: dict, df: pl.DataFrame, predict_od: float) -> None:
+    """
+    Predict the time at which OD will reach predict_od for each pioreactor,
+    based on the time shift from a previous step.
+    """
     pioreactors = equations.keys()
     for pioreactor in pioreactors:
-        pio_df = df.filter(pl.col("Unit").eq(pioreactor)).sort("Time", descending=False).collect()
+        pio_df = df.filter(pl.col("Unit") == pioreactor).sort("Time", descending=False).collect()
 
         steps = pio_df.get_column("Step").sort().unique().to_list()
-        current_od = pio_df.filter(pl.col("Step").eq(steps[-1])).get_column("OD600")[-1]
+        if len(steps) < 3:
+            continue  # not enough data
 
-        last_step = pio_df.filter(pl.col("Step").eq(steps[-3]))
-        thresh_time = (last_step.with_columns((pl.col("OD600") - predict_od).abs().alias("distance"))
-                            .filter(pl.col("distance") == pl.col("distance").min())
-                            .get_column("Time")[0])
+        current_od = pio_df.filter(pl.col("Step") == steps[-1]).get_column("OD600")[-1]
+        last_step = pio_df.filter(pl.col("Step") == steps[-3])
 
-        time_in_last_step = (last_step.with_columns((pl.col("OD600") - current_od).abs().alias("distance"))
-                            .filter(pl.col("distance") == pl.col("distance").min())
-                            .get_column("Time")[0])
+        thresh_time = (
+            last_step
+            .with_columns((pl.col("OD600") - predict_od).abs().alias("distance"))
+            .filter(pl.col("distance") == pl.col("distance").min())
+            .get_column("Time")[0]
+        )
 
-        #Add time to threshold to latest timestamp of current step
-        predicted_time_at_threshold = pio_df.filter(pl.col("Step").eq(steps[-1])).get_column("Time")[-1] + (thresh_time - time_in_last_step)
+        time_in_last_step = (
+            last_step
+            .with_columns((pl.col("OD600") - current_od).abs().alias("distance"))
+            .filter(pl.col("distance") == pl.col("distance").min())
+            .get_column("Time")[0]
+        )
 
-        print(f"Predicted time to {predict_od:.2f} for {pioreactor}: {predicted_time_at_threshold}")
+        predicted_time_at_threshold = (
+            pio_df.filter(pl.col("Step") == steps[-1]).get_column("Time")[-1]
+            + (thresh_time - time_in_last_step)
+        )
+        print(f"Predicted time to OD={predict_od:.2f} for {pioreactor}: {predicted_time_at_threshold}")
 
+
+###############################################################################
+# Main Orchestration
+###############################################################################
+def main():
+    """
+    1. Load and merge data from Exp1 and ~/Downloads.
+    2. Transform & filter the data.
+    3. Plot rolling average curves.
+    4. Classify steps and plot them.
+    5. Filter weird steps, bin data, and plot binned curves.
+    6. Fit slopes; plot rolling slopes, slopes, and lag times.
+    7. Optionally run GrowthRates or threshold predictions.
+    """
+    # Step 1: Load Data
+    exp1_csv = load_data_for_exp1()
+    latest_csv = find_latest_download_csv()
+
+    # Step 2: Merge & Transform
+    combined_lf = merge_experiments(exp1_csv, latest_csv)
+    df = transform_data(combined_lf)
+
+    # Step 3: Rolling average plot
+    # plot_10min_bins(df)
+
+    # Step 4: Classify steps and plot
+    df = classify_steps(df)
+    # plot_classified_steps(df)
+
+    # Step 5: Filter weird steps, bin data, and plot binned curves
+    df_filtered = filter_weird_steps(df)
+    mean_df = bin_data(df_filtered)
+    # plot_binned_data(mean_df)
+
+    # Step 6: Calculate slopes, then plot them (rolling + robust)
+    slopes_and_r2 = calculate_step_slopes_and_r2(mean_df, window_length=10)
+    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+
+    # Rolling slopes
+    # plot_rolling_slopes(mean_df.to_pandas(), window=window)
+
+    # If you want to see individual fits, you can call:
+    # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
+
+    # Plot robust max slopes & lag
+    plot_robust_max_slopes_and_lag(slopes_and_r2)
+
+    # Step 7 (Optional): Run GrowthRates or predict threshold
+    # do_grme(mean_df)
+    # predict_threshold_time(EQUATIONS, df, predict_od=0.30)
+
+
+###############################################################################
+# Entry Point
+###############################################################################
+if __name__ == "__main__":
+    main()
