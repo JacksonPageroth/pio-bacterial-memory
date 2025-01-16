@@ -60,10 +60,10 @@ CONTROLS = ["W2 - 35 ppt Control", "W5 - 55 ppt Control"]
 REPLICATES = ["W3 - Replicate 1", "W4 - Replicate 2"]
 
 WEIRD_STEPS = {
-    "W2 - 35 ppt Control": [16, 18, 21],
-    "W3 - Replicate 1": [10, 16],
-    "W4 - Replicate 2": [11, 16],
-    "W5 - 55 ppt Control": [3, 10],
+    "W2 - 35 ppt Control": [15, 16, 18, 21],
+    "W3 - Replicate 1": [9, 10, 16],
+    "W4 - Replicate 2": [10, 11, 16],
+    "W5 - 55 ppt Control": [3, 9, 10],
 }
 
 COL_ORDER = ["W3 - Replicate 1", "W4 - Replicate 2", "W2 - 35 ppt Control", "W5 - 55 ppt Control"]
@@ -466,7 +466,7 @@ def plot_fit_with_selected_points(
     plt.show()
 
 
-def calculate_step_slopes_and_r2(df: pl.DataFrame, window_length=6) -> pd.DataFrame:
+def calculate_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataFrame:
     """
     Calculate slope & R^2 for each step in Polars DataFrame:
       - Identify subset of points where rolling slope >= 95% of max rolling slope.
@@ -516,7 +516,78 @@ def calculate_step_slopes_and_r2(df: pl.DataFrame, window_length=6) -> pd.DataFr
             # Calculate lag
             first_point_y = group.iloc[0]['ln(Mean OD600)']
             lag_time = ((first_point_y - model.intercept_) / slope) - group.iloc[0]['Hours']
-            lag_point = (lag_time, first_point_y)
+
+            # Instead of plotting here, store the indices for optional plotting
+            selected_indices = slope_points.index.tolist()
+
+            results.append({
+                'Unit': unit,
+                'Step': step,
+                'Slope': slope,
+                'R2': r2,
+                'Points': len(group),
+                'Salinity': group['Salinity'].values[0],
+                'Significant': r2 > 0.95,
+                'Lag': lag_time,
+                'Intercept': model.intercept_,
+                'SelectedIndices': selected_indices,
+            })
+
+    return pd.DataFrame(results)
+
+
+def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataFrame:
+    """
+    Calculate slope & R^2 for each step in Polars DataFrame:
+      - Identify subset of points where rolling slope >= 95% of max rolling slope.
+      - Fit linear regression to that subset, compute slope & R^2.
+      - Estimate lag time (store it), but do NOT plot within this function.
+
+    Returns:
+        pd.DataFrame: Columns 'Unit', 'Step', 'Slope', 'R2', 'Points', 'Salinity',
+                      'Significant', 'Lag', 'SelectedIndices' (for optional plotting).
+    """
+    pdf = df.to_pandas()
+    results = []
+
+    grouped = pdf.groupby(['Unit', 'Step'])
+    for (unit, step), group in grouped:
+        group = group.sort_values('Hours')
+        x = group['Hours'].values
+        y = group['ln(Mean OD600)'].values
+
+        # Calculate rolling slopes
+        rolling_slopes = []
+        for i in range(len(x) - (window_length - 1)):
+            x_window = x[i:i + window_length].reshape(-1, 1)
+            y_window = y[i:i + window_length]
+            model = LinearRegression().fit(x_window, y_window)
+            rolling_slopes.append(model.coef_[0])
+
+        group['Rolling Slope'] = rolling_slopes + [np.nan] * (window_length - 1)
+        group.reset_index(drop=True, inplace=True)
+
+        max_slope = np.nanmax(rolling_slopes) if rolling_slopes else 0
+        matching_indices = group.index[group['Rolling Slope'] >= 0.70 * max_slope].tolist()
+
+        # Include up to window_length rows after each match
+        expanded_indices = set()
+        for idx in matching_indices:
+            expanded_indices.update(range(idx, min(idx + window_length, len(x))))
+
+        slope_points = group.loc[list(expanded_indices)].sort_values("Hours")
+        if len(slope_points) > 1:
+            x_filtered = slope_points['Hours'].values.reshape(-1, 1)
+            y_filtered = slope_points['ln(Mean OD600)'].values
+            model = LinearRegression().fit(x_filtered, y_filtered)
+            slope = model.coef_[0]
+            r2 = model.score(x_filtered, y_filtered)
+
+            # Calculate lag, by getting every point who's Y coordinate is within 10% of the first Y
+            first_point_y = group.iloc[0]['ln(Mean OD600)']
+            lag_time = group.loc[group['ln(Mean OD600)'] <= 0.98 * first_point_y, 'Hours'].max() - group.iloc[0]['Hours']
+            if np.isnan(lag_time):
+                print("tf")
 
             # Instead of plotting here, store the indices for optional plotting
             selected_indices = slope_points.index.tolist()
@@ -888,27 +959,35 @@ def main():
     df = classify_steps(df)
     # plot_classified_steps(df)
 
-    # Step 5: Filter weird steps, bin data, and plot binned curves
-    df_filtered = filter_weird_steps(df)
-    mean_df = bin_data(df_filtered)
-    # plot_binned_data(mean_df)
+    # Step 5: Bin data, and plot binned curves
+    mean_df = bin_data(df)
+    plot_binned_data(mean_df)
 
-    # Step 6: Calculate slopes, then plot them (rolling + robust)
-    slopes_and_r2 = calculate_step_slopes_and_r2(mean_df, window_length=10)
-    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+    # Step 6: Filter weird steps, calculate slopes, then plot them (rolling + robust)
+    mean_df = filter_weird_steps(mean_df)
+    # slopes_and_r2 = calculate_step_slopes_and_lag(mean_df, window_length=10)
+    # slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
 
     # Rolling slopes
-    # plot_rolling_slopes(mean_df.to_pandas(), window=window)
+    plot_rolling_slopes(mean_df.to_pandas(), window=10)
 
     # If you want to see individual fits, you can call:
     # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
 
     # Plot robust max slopes & lag
+    # plot_robust_max_slopes_and_lag(slopes_and_r2)
+
+    # Calculate steps and slops alternatives
+    slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
+    plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
     plot_robust_max_slopes_and_lag(slopes_and_r2)
 
     # Step 7 (Optional): Run GrowthRates or predict threshold
     # do_grme(mean_df)
     # predict_threshold_time(EQUATIONS, df, predict_od=0.30)
+
+    # Print the weird steps that were removed
+    print(f"Removed steps: {WEIRD_STEPS}")
 
 
 ###############################################################################
