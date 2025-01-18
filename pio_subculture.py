@@ -11,12 +11,11 @@ This script demonstrates how to:
 6. Optionally run external GrowthRates software (GRME).
 7. Optionally predict time to reach specified OD thresholds.
 
-Author: Your Name
-Date: 2025-01-13
 """
 
 import os
 import glob
+import math
 import zipfile
 import subprocess
 
@@ -568,7 +567,7 @@ def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.D
         group.reset_index(drop=True, inplace=True)
 
         max_slope = np.nanmax(rolling_slopes) if rolling_slopes else 0
-        matching_indices = group.index[group['Rolling Slope'] >= 0.70 * max_slope].tolist()
+        matching_indices = group.index[group['Rolling Slope'] >= 0.50 * max_slope].tolist()
 
         # Include up to window_length rows after each match
         expanded_indices = set()
@@ -583,11 +582,12 @@ def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.D
             slope = model.coef_[0]
             r2 = model.score(x_filtered, y_filtered)
 
-            # Calculate lag, by getting every point who's Y coordinate is within 10% of the first Y
-            first_point_y = group.iloc[0]['ln(Mean OD600)']
-            lag_time = group.loc[group['ln(Mean OD600)'] <= 0.98 * first_point_y, 'Hours'].max() - group.iloc[0]['Hours']
-            if np.isnan(lag_time):
-                print("tf")
+            # Calculate lag, by getting every point who's Y is within the standard deviation of the first 30 minutes
+            subset_30 = group[group["Hours"] - group.iloc[0]["Hours"] <= 0.5]
+            assert not subset_30.empty, "No points in the first 30 minutes"
+            baseline_mean = subset_30["ln(Mean OD600)"].mean()
+            baseline_std = subset_30["ln(Mean OD600)"].std()
+            lag_time = group[group["ln(Mean OD600)"] <= baseline_mean + 2*baseline_std]["Hours"].max() - group.iloc[0]["Hours"]
 
             # Instead of plotting here, store the indices for optional plotting
             selected_indices = slope_points.index.tolist()
@@ -682,10 +682,10 @@ def plot_rolling_slopes(df: pd.DataFrame, window=6) -> None:
 
 def plot_robust_max_slopes_and_lag(
     slopes_and_r2,
+    slope_title,
+    lag_title,
     hue_order=("Optimal", "Stressed"),
     palette=("blue", "red"),
-    slope_title="Slopes",
-    lag_title="Lag times",
     fontsize=30
 ):
     """
@@ -787,6 +787,182 @@ def plot_robust_max_slopes_and_lag(
                 force_text=0.8,
                 force_points=0.2,
             )
+
+    plt.show()
+
+
+def plot_robust_max_slopes_over_lag(
+    slopes_and_r2,
+    title,
+    hue_order=("Optimal", "Stressed"),
+    palette=("blue", "red"),
+    fontsize=30
+):
+    """
+    Plots two lmplot figures:
+      1) Slope vs. Step (Robust RLM)
+      2) Lag vs. Step (Robust RLM)
+    """
+    # 1) PLOT SLOPE VS LAG
+    slope_grid = sns.lmplot(
+        x="Lag",
+        y="Slope",
+        hue="Salinity",
+        col="Unit",
+        col_wrap=2,
+        data=slopes_and_r2,
+        height=10,
+        col_order=COL_ORDER,
+        hue_order=hue_order,
+        palette=palette,
+        robust=True,   # Seaborn's 'robust' is not the same as statsmodels RLM
+        scatter_kws={"s": 50},
+        line_kws={"lw": 2},
+    )
+    slope_grid.fig.suptitle(title)
+    slope_grid.set_axis_labels("Lag (hour)", "Slope (1/hour)")
+
+    # Each facet is an Axes object
+    for ax in slope_grid.axes.flat:
+        title = ax.get_title()
+        # e.g. "Unit = W3 - Replicate 1"
+        unit_value = title.split(" = ")[-1].strip()
+
+        # We'll collect all annotation text objects for this Axes here
+        text_objs = []
+
+        color_map = dict(zip(hue_order, palette))
+
+        # We’ll place them near the median Step in data coordinates
+        for sal in hue_order:
+            subset = slopes_and_r2[(slopes_and_r2["Unit"] == unit_value) & (slopes_and_r2["Salinity"] == sal)]
+            if subset.shape[0] < 2:
+                continue  # Not enough points for regression
+
+            # Choose the formula depending on which figure we're annotating
+            model = smf.rlm("Slope ~ Lag", data=subset).fit()
+
+            slope = model.params["Lag"]
+            intercept = model.params["Intercept"]
+            p_value = model.pvalues["Lag"]
+
+            annot_text = (
+                f"{sal}: y = {slope:.2g}x + {intercept:.2g}\n"
+                f"p = {p_value:.2g}"
+            )
+
+            # We'll place the text near the median
+            x_point = subset["Lag"].median()
+            # For consistency, compute the y_point from the regression line
+            y_point = intercept + slope * x_point
+
+            # Create the annotation text object in data coords
+            t = ax.annotate(
+                annot_text,
+                (x_point, y_point),
+                fontsize=fontsize,
+                color=color_map[sal],
+            )
+            text_objs.append(t)
+
+        # Now that all text objects are created for this Axes,
+        # we call adjust_text to nudge them around if needed
+        adjust_text(
+            text_objs,
+            ax=ax,
+            force_text=0.8,
+            force_points=0.2,
+        )
+
+    plt.show()
+
+
+def plot_robust_generation_time_lag_ratio_over_step(
+    slopes_and_r2,
+    title,
+    hue_order=("Optimal", "Stressed"),
+    palette=("blue", "red"),
+    fontsize=30
+):
+    """
+    Plots two lmplot figures:
+      1) Slope vs. Step (Robust RLM)
+      2) Lag vs. Step (Robust RLM)
+    """
+
+    # Take the ratio of slope to lag
+    slopes_and_r2["GT_Lag"] = (math.log(2) / slopes_and_r2["Slope"]) / slopes_and_r2["Lag"]
+
+    # 1) PLOT SLOPE VS LAG
+    slope_grid = sns.lmplot(
+        x="Step",
+        y="GT_Lag",
+        hue="Salinity",
+        col="Unit",
+        col_wrap=2,
+        data=slopes_and_r2,
+        height=10,
+        col_order=COL_ORDER,
+        hue_order=hue_order,
+        palette=palette,
+        robust=True,   # Seaborn's 'robust' is not the same as statsmodels RLM
+        scatter_kws={"s": 50},
+        line_kws={"lw": 2},
+    )
+    slope_grid.fig.suptitle(title)
+    slope_grid.set_axis_labels("Step", "Generation Time/Lag")
+
+    # Each facet is an Axes object
+    for ax in slope_grid.axes.flat:
+        title = ax.get_title()
+        # e.g. "Unit = W3 - Replicate 1"
+        unit_value = title.split(" = ")[-1].strip()
+
+        # We'll collect all annotation text objects for this Axes here
+        text_objs = []
+
+        color_map = dict(zip(hue_order, palette))
+
+        # We’ll place them near the median Step in data coordinates
+        for sal in hue_order:
+            subset = slopes_and_r2[(slopes_and_r2["Unit"] == unit_value) & (slopes_and_r2["Salinity"] == sal)]
+            if subset.shape[0] < 2:
+                continue  # Not enough points for regression
+
+            # Choose the formula depending on which figure we're annotating
+            model = smf.rlm("GT_Lag ~ Step", data=subset).fit()
+
+            slope = model.params["Step"]
+            intercept = model.params["Intercept"]
+            p_value = model.pvalues["Step"]
+
+            annot_text = (
+                f"{sal}: y = {slope:.2g}x + {intercept:.2g}\n"
+                f"p = {p_value:.2g}"
+            )
+
+            # We'll place the text near the median
+            x_point = subset["Step"].median()
+            # For consistency, compute the y_point from the regression line
+            y_point = intercept + slope * x_point
+
+            # Create the annotation text object in data coords
+            t = ax.annotate(
+                annot_text,
+                (x_point, y_point),
+                fontsize=fontsize,
+                color=color_map[sal],
+            )
+            text_objs.append(t)
+
+        # Now that all text objects are created for this Axes,
+        # we call adjust_text to nudge them around if needed
+        adjust_text(
+            text_objs,
+            ax=ax,
+            force_text=0.8,
+            force_points=0.2,
+        )
 
     plt.show()
 
@@ -961,26 +1137,28 @@ def main():
 
     # Step 5: Bin data, and plot binned curves
     mean_df = bin_data(df)
-    plot_binned_data(mean_df)
+    # plot_binned_data(mean_df)
 
     # Step 6: Filter weird steps, calculate slopes, then plot them (rolling + robust)
     mean_df = filter_weird_steps(mean_df)
-    # slopes_and_r2 = calculate_step_slopes_and_lag(mean_df, window_length=10)
-    # slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+    slopes_and_r2 = calculate_step_slopes_and_lag(mean_df, window_length=10)
+    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
 
-    # Rolling slopes
-    plot_rolling_slopes(mean_df.to_pandas(), window=10)
-
-    # If you want to see individual fits, you can call:
+    # Plot the data
+    # plot_rolling_slopes(mean_df.to_pandas(), window=10)
     # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
+    # plot_robust_max_slopes_and_lag(slopes_and_r2, "Max slopes", "Lag")
+    # plot_robust_max_slopes_over_lag(slopes_and_r2, "Max slopes over Lag")
 
-    # Plot robust max slopes & lag
-    # plot_robust_max_slopes_and_lag(slopes_and_r2)
-
-    # Calculate steps and slops alternatives
+    # Calculate steps and slopes alternatives
     slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
+    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+
+    # Plot the data
     plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
-    plot_robust_max_slopes_and_lag(slopes_and_r2)
+    plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)")
+    plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)")
+    plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)")
 
     # Step 7 (Optional): Run GrowthRates or predict threshold
     # do_grme(mean_df)
