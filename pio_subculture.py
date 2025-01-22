@@ -30,7 +30,6 @@ import statsmodels.formula.api as smf
 from adjustText import adjust_text
 from sklearn.linear_model import LinearRegression
 
-
 sns.set_theme(context="poster", style="white")
 
 ###############################################################################
@@ -171,9 +170,9 @@ def transform_data(df: pl.LazyFrame) -> pl.DataFrame:
     # Remove known artifact for W5 - 55 ppt Control
     df = df.filter(
         (
-            pl.col("Unit").eq("W5 - 55 ppt Control")
-            & pl.col("Hours").ge(104.2)
-            & pl.col("Hours").le(104.4)
+                pl.col("Unit").eq("W5 - 55 ppt Control")
+                & pl.col("Hours").ge(104.2)
+                & pl.col("Hours").le(104.4)
         ).not_()
     )
 
@@ -406,14 +405,14 @@ def plot_binned_data(mean_df: pl.DataFrame) -> None:
 # Regression & Plots
 ###############################################################################
 def plot_fit_with_selected_points(
-    ldf: pd.DataFrame,
-    unit: str,
-    step: str,
-    slope: float,
-    intercept: float,
-    selected_indices: list,
-    significant: float,
-    lag_point: tuple,
+        ldf: pd.DataFrame,
+        unit: str,
+        step: str,
+        slope: float,
+        intercept: float,
+        selected_indices: list,
+        significant: float,
+        lag_point: tuple,
 ):
     """
     Plot original data with the line fit and highlight points used for slope calculation.
@@ -587,7 +586,8 @@ def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.D
             assert not subset_30.empty, "No points in the first 30 minutes"
             baseline_mean = subset_30["ln(Mean OD600)"].mean()
             baseline_std = subset_30["ln(Mean OD600)"].std()
-            lag_time = group[group["ln(Mean OD600)"] <= baseline_mean + 2*baseline_std]["Hours"].max() - group.iloc[0]["Hours"]
+            lag_time = group[group["ln(Mean OD600)"] <= baseline_mean + 2 * baseline_std]["Hours"].max() - \
+                       group.iloc[0]["Hours"]
 
             # Instead of plotting here, store the indices for optional plotting
             selected_indices = slope_points.index.tolist()
@@ -623,7 +623,7 @@ def plot_selected_fits(slopes_and_r2: pd.DataFrame, original_df: pd.DataFrame) -
         lag_time = row["Lag"]
         first_point_y = original_df[
             (original_df["Unit"] == unit) & (original_df["Step"] == step)
-        ].sort_values("Hours")["ln(Mean OD600)"].iloc[0]
+            ].sort_values("Hours")["ln(Mean OD600)"].iloc[0]
 
         # Create a lag_point tuple for the intersection
         lag_point = (lag_time, first_point_y)
@@ -681,12 +681,12 @@ def plot_rolling_slopes(df: pd.DataFrame, window=6) -> None:
 
 
 def plot_robust_max_slopes_and_lag(
-    slopes_and_r2,
-    slope_title,
-    lag_title,
-    hue_order=("Optimal", "Stressed"),
-    palette=("blue", "red"),
-    fontsize=30
+        slopes_and_r2,
+        slope_title,
+        lag_title,
+        hue_order=("Optimal", "Stressed"),
+        palette=("blue", "red"),
+        fontsize=30
 ):
     """
     Plots two lmplot figures:
@@ -705,7 +705,7 @@ def plot_robust_max_slopes_and_lag(
         col_order=COL_ORDER,
         hue_order=hue_order,
         palette=palette,
-        robust=True,   # Seaborn's 'robust' is not the same as statsmodels RLM
+        robust=True,  # Seaborn's 'robust' is not the same as statsmodels RLM
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
@@ -792,11 +792,11 @@ def plot_robust_max_slopes_and_lag(
 
 
 def plot_robust_max_slopes_over_lag(
-    slopes_and_r2,
-    title,
-    hue_order=("Optimal", "Stressed"),
-    palette=("blue", "red"),
-    fontsize=30
+        slopes_and_r2,
+        title,
+        hue_order=("Optimal", "Stressed"),
+        palette=("blue", "red"),
+        fontsize=30
 ):
     """
     Plots two lmplot figures:
@@ -815,7 +815,7 @@ def plot_robust_max_slopes_over_lag(
         col_order=COL_ORDER,
         hue_order=hue_order,
         palette=palette,
-        robust=True,   # Seaborn's 'robust' is not the same as statsmodels RLM
+        robust=True,  # Seaborn's 'robust' is not the same as statsmodels RLM
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
@@ -878,11 +878,11 @@ def plot_robust_max_slopes_over_lag(
 
 
 def plot_robust_generation_time_lag_ratio_over_step(
-    slopes_and_r2,
-    title,
-    hue_order=("Optimal", "Stressed"),
-    palette=("blue", "red"),
-    fontsize=30
+        slopes_and_r2,
+        title,
+        hue_order=("Optimal", "Stressed"),
+        palette=("blue", "red"),
+        fontsize=30
 ):
     """
     Plots two lmplot figures:
@@ -905,7 +905,7 @@ def plot_robust_generation_time_lag_ratio_over_step(
         col_order=COL_ORDER,
         hue_order=hue_order,
         palette=palette,
-        robust=True,   # Seaborn's 'robust' is not the same as statsmodels RLM
+        robust=True,  # Seaborn's 'robust' is not the same as statsmodels RLM
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
@@ -967,106 +967,95 @@ def plot_robust_generation_time_lag_ratio_over_step(
     plt.show()
 
 
-###############################################################################
-# GrowthRates (GRME) Integration & Prediction
-###############################################################################
-def do_grme(mean_df: pl.DataFrame) -> None:
+def plot_robust_last_step_od_over_lag(mean_df: pd.DataFrame, slopes_and_r2,
+                                      title,
+                                      hue_order=("Optimal", "Stressed"),
+                                      palette=("blue", "red"),
+                                      fontsize=30):
     """
-    Optionally run external GrowthRates software on mean_df data, then plot summary.
+    Plots two lmplot figures:
+      1) Slope vs. Step (Robust RLM)
+      2) Lag vs. Step (Robust RLM)
     """
-    GROWTH_RATES_EXEC_PATH = '/Applications/GrowthRates_6.2.1/GrowthRates'
-    OUTPUT_DIR = './grme/'
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    for worker in mean_df.get_column("Unit").unique().to_list():
-        worker_file = os.path.join(OUTPUT_DIR, f"{worker}.txt")
+    # Get the OD of the last point in each the each step and the lag time of the next step
+    slopes_and_r2["Last_OD_600"] = np.NaN
+    for (unit, step), group in mean_df.groupby(['Unit', 'Step']):
+        group = group.sort_values('Hours')
+        last_od = group['ln(Mean OD600)'].iloc[-1]
+        slopes_and_r2.loc[(slopes_and_r2["Unit"] == unit) & (slopes_and_r2["Step"] == step+1), "Last_OD_600"] = last_od
 
-        worker_df = (
-            mean_df.filter(pl.col("Unit") == worker)
-            .with_columns((pl.col("Hours") * 6).round().mul(10).cast(pl.Int64).alias("Min"))
-            .with_columns(pl.col("Min").sub(pl.col("Min").min()).over("Step"))
-        )
+    # Plot the last OD vs the lag time
+    slope_grid = sns.lmplot(
+        x="Lag",
+        y="Last_OD_600",
+        hue="Salinity",
+        col="Unit",
+        col_wrap=2,
+        data=slopes_and_r2,
+        height=10,
+        col_order=COL_ORDER,
+        hue_order=hue_order,
+        palette=palette,
+        robust=True,  # Seaborn's 'robust' is not the same as statsmodels RLM
+        scatter_kws={"s": 50},
+        line_kws={"lw": 2},
+    )
+    slope_grid.fig.suptitle(title)
+    slope_grid.set_axis_labels("Lag", "Previous step ln(OD600)")
 
-        # Convert ln(Mean OD600) back to OD
-        worker_df = worker_df.pivot(index="Min", on="Step", values="ln(Mean OD600)").sort("Min")
-        worker_df = worker_df.with_columns(pl.col("*").exclude("Min").exp())
+    # Each facet is an Axes object
+    for ax in slope_grid.axes.flat:
+        title = ax.get_title()
+        # e.g. "Unit = W3 - Replicate 1"
+        unit_value = title.split(" = ")[-1].strip()
 
-        # Aggregate
-        worker_df = worker_df.group_by("Min").agg(pl.col("*").exclude("Min").max())
-        worker_df = worker_df.with_columns(pl.col("*").exclude("Min").forward_fill())
+        # We'll collect all annotation text objects for this Axes here
+        text_objs = []
 
-        # Rename
-        worker_df = worker_df.rename({
-            col: f"{worker}_{col}" for col in worker_df.columns if col != "Min"
-        })
-        worker_df.write_csv(worker_file, separator='\t')
+        color_map = dict(zip(hue_order, palette))
 
-        # Run GrowthRates
-        try:
-            command = [GROWTH_RATES_EXEC_PATH, "-i", os.path.relpath(worker_file), "-b", "0.077"]
-            process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+        # We’ll place them near the median Step in data coordinates
+        for sal in hue_order:
+            subset = slopes_and_r2[(slopes_and_r2["Unit"] == unit_value) & (slopes_and_r2["Salinity"] == sal)]
+            if subset.shape[0] < 2:
+                continue  # Not enough points for regression
+
+            # Choose the formula depending on which figure we're annotating
+            model = smf.rlm("Last_OD_600 ~ Lag", data=subset).fit()
+
+            slope = model.params["Lag"]
+            intercept = model.params["Intercept"]
+            p_value = model.pvalues["Lag"]
+
+            annot_text = (
+                f"{sal}: y = {slope:.2g}x + {intercept:.2g}\n"
+                f"p = {p_value:.2g}"
             )
-            stdout, stderr = process.communicate(input="1\nY\n")
-            if process.returncode == 0:
-                print(f"Successfully processed {worker}:\n{stdout}")
-            else:
-                print(f"Error processing {worker}:\n{stderr}")
-        except Exception as e:
-            print(f"Error running GrowthRates for {worker}: {e}")
 
-    # Visualization
-    fig, ax = plt.subplots(figsize=(20, 12))
-    palette = {
-        'W2 - 35 ppt Control': "blue",
-        'W5 - 55 ppt Control': "red",
-        'W3 - Replicate 1': "green",
-        'W4 - Replicate 2': "mediumseagreen"
-    }
+            # We'll place the text near the median
+            x_point = subset["Lag"].median()
+            # For consistency, compute the y_point from the regression line
+            y_point = intercept + slope * x_point
 
-    for filepath in glob.glob(os.path.expanduser('grme/*.summary')):
-        temp_df = pd.read_csv(
-            filepath,
-            sep='\t',
-            header=2,
-            usecols=['Well', 'min', 'hours', 'R', 'Max OD', 'lag time (minutes)']
-        )
-        temp_df.rename(columns={'hours': 'Growth Rate (1/hours)'}, inplace=True)
-        unit_name = os.path.basename(filepath).split('.')[0]
+            # Create the annotation text object in data coords
+            t = ax.annotate(
+                annot_text,
+                (x_point, y_point),
+                fontsize=fontsize,
+                color=color_map[sal],
+            )
+            text_objs.append(t)
 
-        sns.lineplot(
-            data=temp_df,
-            x=temp_df.index,
-            y='Growth Rate (1/hours)',
+        # Now that all text objects are created for this Axes,
+        # we call adjust_text to nudge them around if needed
+        adjust_text(
+            text_objs,
             ax=ax,
-            color=palette.get(unit_name, "black"),
-            label=unit_name
+            force_text=0.8,
+            force_points=0.2,
         )
 
-        # Best-fit lines
-        x = temp_df.index
-        y = temp_df['Growth Rate (1/hours)']
-        if unit_name in ['W3 - Replicate 1', 'W4 - Replicate 2']:
-            # Sub-logic: e.g. fit odd/even steps
-            if len(x[::2]) > 1:
-                m, b = np.polyfit(x[::2], y[::2], 1)
-                ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed')
-            if len(x[1::2]) > 1:
-                m, b = np.polyfit(x[1::2], y[1::2], 1)
-                ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed')
-        elif unit_name in ['W2 - 35 ppt Control', 'W5 - 55 ppt Control'] and len(x) > 1:
-            m, b = np.polyfit(x, y, 1)
-            ax.plot(x, m * x + b, color=palette[unit_name], linestyle='dashed')
-
-    plt.xlabel('Step Number')
-    plt.ylabel('Growth Rate (1/hours)')
-    plt.title('Growth rates')
-    plt.tight_layout()
-    plt.legend(loc='lower right')
     plt.show()
 
 
@@ -1101,8 +1090,8 @@ def predict_threshold_time(equations: dict, df: pl.DataFrame, predict_od: float)
         )
 
         predicted_time_at_threshold = (
-            pio_df.filter(pl.col("Step") == steps[-1]).get_column("Time")[-1]
-            + (thresh_time - time_in_last_step)
+                pio_df.filter(pl.col("Step") == steps[-1]).get_column("Time")[-1]
+                + (thresh_time - time_in_last_step)
         )
         print(f"Predicted time to OD={predict_od:.2f} for {pioreactor}: {predicted_time_at_threshold}")
 
@@ -1149,16 +1138,18 @@ def main():
     # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
     # plot_robust_max_slopes_and_lag(slopes_and_r2, "Max slopes", "Lag")
     # plot_robust_max_slopes_over_lag(slopes_and_r2, "Max slopes over Lag")
+    plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag")
 
     # Calculate steps and slopes alternatives
     slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
     slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
 
     # Plot the data
-    plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
-    plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)")
-    plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)")
-    plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)")
+    # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
+    # plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)")
+    # plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)")
+    # plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)")
+    plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag (alt)")
 
     # Step 7 (Optional): Run GrowthRates or predict threshold
     # do_grme(mean_df)
