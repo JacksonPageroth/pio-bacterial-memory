@@ -29,7 +29,7 @@ import statsmodels.formula.api as smf
 from adjustText import adjust_text
 from sklearn.linear_model import LinearRegression
 
-sns.set_theme(context="paper", style="white")
+sns.set_theme(context="poster", style="white")
 
 ###############################################################################
 # Global Config & Dictionaries
@@ -99,20 +99,18 @@ def load_data_for_exp1() -> str:
     Returns:
         str: Path to the CSV file for Exp1.
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    exp1_zip_path = os.path.join(base_dir, 'od_logs', 'exp1.zip')
-    return unzip_and_rename_csv(exp1_zip_path, renamed_csv="exp1.csv")
+    return unzip_and_rename_csv('./od_logs/exp1.zip', renamed_csv="exp1.csv")
 
 
 def find_latest_download_csv() -> str:
     """
     Find the most recent .csv in ~/Downloads, or default to './od_logs/latest_od_data.csv'.
     """
+    return "./od_logs/latest_od_data.csv"
 
     csv_files = glob.glob(os.path.expanduser('~/Downloads/*.csv'))
     if len(csv_files) == 0:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base_dir, 'od_logs', 'latest_od_data.csv')
+        return "./od_logs/latest_od_data.csv"
     else:
         return max(csv_files, key=os.path.getmtime)
 
@@ -186,7 +184,7 @@ def transform_data(df: pl.LazyFrame) -> pl.DataFrame:
 ###############################################################################
 # Plotting
 ###############################################################################
-def plot_10min_bins_whole_experiment(df: pl.DataFrame) -> None:
+def plot_10min_bins(df: pl.DataFrame) -> None:
     """
     Take a rolling average in 10m bins and plot growth curves.
     """
@@ -224,9 +222,9 @@ def plot_10min_bins_whole_experiment(df: pl.DataFrame) -> None:
     secax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
     secax.set_xlabel("Date")
 
-    ax.set_title('Pioreactor OD Curves binned in 10m intervals')
+    ax.set_title('Pioreactor Transformed OD Curves')
     plt.grid(True)
-    plt.savefig("plots/general/whole_experiment_binned_od_curves.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 ###############################################################################
@@ -320,9 +318,8 @@ def plot_classified_steps(df: pl.DataFrame) -> None:
 
     for ax in g.axes.flatten():
         ax.axhline(y=THRESHOLD_OD, color='black', linestyle='--')
-    g.fig.subplots_adjust(top=0.95)
     g.fig.suptitle('Pioreactor OD Curves')
-    plt.savefig("plots/general/classified_steps_od_curves.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 ###############################################################################
@@ -340,21 +337,19 @@ def filter_weird_steps(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def bin_data(df: pl.DataFrame, log: bool) -> pl.DataFrame:
+def bin_data(df: pl.DataFrame) -> pl.DataFrame:
     """
     Bin data in 10-minute increments, compute Mean OD600, then log-transform.
     """
-    mean_df = (df
-        .with_columns(pl.col("Time").dt.truncate("10m").alias("Time"))
+    mean_df = (
+        df.with_columns(pl.col("Time").dt.truncate("10m").alias("Time"))
         .group_by("Unit", "Time", "Salinity", "Step")
         .agg(pl.col("OD600").mean().alias("Mean OD600"))
         .with_columns(
             (pl.col("Time").sub(pl.col("Time").min()).dt.total_seconds() / 3600).alias("Hours")
         )
+        .with_columns(pl.col("Mean OD600").log().alias("ln(Mean OD600)"))
     )
-    
-    if log:
-        mean_df = mean_df.with_columns(pl.col("Mean OD600").log().alias("ln(Mean OD600)"))
     return mean_df
 
 
@@ -381,9 +376,8 @@ def plot_binned_data(mean_df: pl.DataFrame) -> None:
     )
     for ax in g.axes.flatten():
         ax.axhline(y=THRESHOLD_OD, color='black', linestyle='--')
-    g.fig.subplots_adjust(top=0.95)
     g.fig.suptitle('Pioreactor binned OD Curves')
-    plt.savefig("plots/general/binned_od_curves.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
     # Plot binned ln(OD)
     g = sns.relplot(
@@ -404,9 +398,8 @@ def plot_binned_data(mean_df: pl.DataFrame) -> None:
     )
     for ax in g.axes.flatten():
         ax.axhline(y=np.log(THRESHOLD_OD), color='black', linestyle='--')
-    g.fig.subplots_adjust(top=0.95)
     g.fig.suptitle('Pioreactor binned ln(OD) Curves')
-    plt.savefig("plots/general/binned_ln_OD_curves.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 ###############################################################################
@@ -421,7 +414,6 @@ def plot_fit_with_selected_points(
         selected_indices: list,
         significant: float,
         lag_point: tuple,
-        filename: str
 ):
     """
     Plot original data with the line fit and highlight points used for slope calculation.
@@ -470,7 +462,7 @@ def plot_fit_with_selected_points(
     plt.legend()
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig(f"{filename}_{unit}_{step}.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 def calculate_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataFrame:
@@ -478,8 +470,8 @@ def calculate_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataF
     Calculate slope & R^2 for each step in Polars DataFrame:
       - Identify subset of points where rolling slope >= 95% of max rolling slope.
       - Fit linear regression to that subset, compute slope & R^2.
-      - Estimate lag time 
-      
+      - Estimate lag time (store it), but do NOT plot within this function.
+
     Returns:
         pd.DataFrame: Columns 'Unit', 'Step', 'Slope', 'R2', 'Points', 'Salinity',
                       'Significant', 'Lag', 'SelectedIndices' (for optional plotting).
@@ -546,9 +538,7 @@ def calculate_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataF
 def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataFrame:
     """
     Calculate slope & R^2 for each step in Polars DataFrame:
-      - Identify subset of points where rolling slope >= 50% of max rolling slope.
-      - Estimates lag as the time when ln(Mean OD600) <= baseline + 2*std in the first 30 minutes.
-      - Lag phase baseline is the mean of the first 30 minutes.
+      - Identify subset of points where rolling slope >= 95% of max rolling slope.
       - Fit linear regression to that subset, compute slope & R^2.
       - Estimate lag time (store it), but do NOT plot within this function.
 
@@ -619,7 +609,7 @@ def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.D
     return pd.DataFrame(results)
 
 
-def plot_selected_fits(slopes_and_r2: pd.DataFrame, original_df: pd.DataFrame, filename: str) -> None:
+def plot_selected_fits(slopes_and_r2: pd.DataFrame, original_df: pd.DataFrame) -> None:
     """
     Using the results from calculate_step_slopes_and_r2 (including 'SelectedIndices'),
     plot the original data with the fits for each row in slopes_and_r2.
@@ -647,8 +637,7 @@ def plot_selected_fits(slopes_and_r2: pd.DataFrame, original_df: pd.DataFrame, f
             intercept,
             selected_indices,
             r2,
-            lag_point,
-            filename
+            lag_point
         )
 
 
@@ -659,7 +648,7 @@ def plot_rolling_slopes(df: pd.DataFrame, window=6) -> None:
     rolling_slopes = []
     grouped = df.groupby(['Unit', 'Step'])
 
-    for _, group in grouped:
+    for (unit, step), group in grouped:
         group = group.sort_values('Hours')
         x = group['Hours'].values
         y = group['ln(Mean OD600)'].values
@@ -688,9 +677,8 @@ def plot_rolling_slopes(df: pd.DataFrame, window=6) -> None:
         height=10,
         markers=True
     )
-    g.fig.subplots_adjust(top=0.95)
-    g.fig.suptitle(f"Rolling Slopes with Window Size {window}")
-    plt.savefig("plots/general/rolling_slopes.pdf", bbox_inches='tight', dpi=300)
+    g.fig.suptitle("Rolling Slopes")
+    plt.show()
 
 
 def plot_robust_max_slopes_and_lag(
@@ -699,7 +687,7 @@ def plot_robust_max_slopes_and_lag(
         lag_title,
         hue_order=("Optimal", "Stressed"),
         palette=("blue", "red"),
-        filename="robust_slopes_and_lags"
+        fontsize=30
 ):
     """
     Plots two lmplot figures:
@@ -722,7 +710,6 @@ def plot_robust_max_slopes_and_lag(
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
-    slope_grid.fig.subplots_adjust(top=0.95)
     slope_grid.fig.suptitle(slope_title)
     slope_grid.set_axis_labels("Step", "Slope (1/hour)")
 
@@ -742,12 +729,11 @@ def plot_robust_max_slopes_and_lag(
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
-    lag_grid.fig.subplots_adjust(top=0.95)
     lag_grid.fig.suptitle(lag_title)
     lag_grid.set_axis_labels("Step", "Lag time (Hours)")
 
     # Annotate both slope and lag figures
-    for fig, fig_suptitle in [(slope_grid, slope_title), (lag_grid, lag_title)]:
+    for fig in [slope_grid, lag_grid]:
         # Each facet is an Axes object
         for ax in fig.axes.flat:
             title = ax.get_title()
@@ -789,6 +775,7 @@ def plot_robust_max_slopes_and_lag(
                 t = ax.annotate(
                     annot_text,
                     (x_point, y_point),
+                    fontsize=fontsize,
                     color=color_map[sal],
                 )
                 text_objs.append(t)
@@ -802,7 +789,7 @@ def plot_robust_max_slopes_and_lag(
                 force_points=0.2,
             )
 
-        fig.fig.savefig(f"{filename}_{fig_suptitle}.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 def plot_robust_max_slopes_over_lag(
@@ -810,7 +797,7 @@ def plot_robust_max_slopes_over_lag(
         title,
         hue_order=("Optimal", "Stressed"),
         palette=("blue", "red"),
-        filename="robust_max_slopes_over_lag"
+        fontsize=30
 ):
     """
     Plots two lmplot figures:
@@ -833,7 +820,6 @@ def plot_robust_max_slopes_over_lag(
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
-    slope_grid.fig.subplots_adjust(top=0.95)
     slope_grid.fig.suptitle(title)
     slope_grid.set_axis_labels("Lag (hour)", "Slope (1/hour)")
 
@@ -875,6 +861,7 @@ def plot_robust_max_slopes_over_lag(
             t = ax.annotate(
                 annot_text,
                 (x_point, y_point),
+                fontsize=fontsize,
                 color=color_map[sal],
             )
             text_objs.append(t)
@@ -888,7 +875,7 @@ def plot_robust_max_slopes_over_lag(
             force_points=0.2,
         )
 
-    plt.savefig(f"{filename}.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 def plot_robust_generation_time_lag_ratio_over_step(
@@ -896,7 +883,7 @@ def plot_robust_generation_time_lag_ratio_over_step(
         title,
         hue_order=("Optimal", "Stressed"),
         palette=("blue", "red"),
-        filename="robust_generation_time_lag_ratio_over_step"
+        fontsize=30
 ):
     """
     Plots two lmplot figures:
@@ -923,7 +910,6 @@ def plot_robust_generation_time_lag_ratio_over_step(
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
-    slope_grid.fig.subplots_adjust(top=0.95)
     slope_grid.fig.suptitle(title)
     slope_grid.set_axis_labels("Step", "Generation Time/Lag")
 
@@ -965,6 +951,7 @@ def plot_robust_generation_time_lag_ratio_over_step(
             t = ax.annotate(
                 annot_text,
                 (x_point, y_point),
+                fontsize=fontsize,
                 color=color_map[sal],
             )
             text_objs.append(t)
@@ -978,14 +965,14 @@ def plot_robust_generation_time_lag_ratio_over_step(
             force_points=0.2,
         )
 
-    plt.savefig(f"{filename}.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 def plot_robust_last_step_od_over_lag(mean_df: pd.DataFrame, slopes_and_r2,
                                       title,
                                       hue_order=("Optimal", "Stressed"),
                                       palette=("blue", "red"),
-                                      filename="robust_last_step_od_over_lag"):
+                                      fontsize=30):
     """
     Plots two lmplot figures:
       1) Slope vs. Step (Robust RLM)
@@ -993,7 +980,7 @@ def plot_robust_last_step_od_over_lag(mean_df: pd.DataFrame, slopes_and_r2,
     """
 
     # Get the OD of the last point in each the each step and the lag time of the next step
-    slopes_and_r2["Last_OD_600"] = np.nan
+    slopes_and_r2["Last_OD_600"] = np.NaN
     for (unit, step), group in mean_df.groupby(['Unit', 'Step']):
         group = group.sort_values('Hours')
         last_od = group['ln(Mean OD600)'].iloc[-1]
@@ -1015,7 +1002,6 @@ def plot_robust_last_step_od_over_lag(mean_df: pd.DataFrame, slopes_and_r2,
         scatter_kws={"s": 50},
         line_kws={"lw": 2},
     )
-    slope_grid.fig.subplots_adjust(top=0.95)
     slope_grid.fig.suptitle(title)
     slope_grid.set_axis_labels("Lag", "Previous step ln(OD600)")
 
@@ -1057,6 +1043,7 @@ def plot_robust_last_step_od_over_lag(mean_df: pd.DataFrame, slopes_and_r2,
             t = ax.annotate(
                 annot_text,
                 (x_point, y_point),
+                fontsize=fontsize,
                 color=color_map[sal],
             )
             text_objs.append(t)
@@ -1070,7 +1057,7 @@ def plot_robust_last_step_od_over_lag(mean_df: pd.DataFrame, slopes_and_r2,
             force_points=0.2,
         )
 
-    plt.savefig(f"{filename}.pdf", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 def predict_threshold_time(equations: dict, df: pl.DataFrame, predict_od: float) -> None:
@@ -1111,10 +1098,6 @@ def predict_threshold_time(equations: dict, df: pl.DataFrame, predict_od: float)
 
 
 def do_grofit(df: pl.DataFrame) -> None:
-    
-    # Within each step, subtract hours from the first hour to get relative time
-    df = df.with_columns((pl.col("Hours") - pl.col("Hours").min()).over("Unit", "Step").alias("Hours"))
-    
     # Create the metadata columns:
     # - experiment_id: here taken as "Unit"
     # - additional_info: here taken as "Step"
@@ -1125,12 +1108,13 @@ def do_grofit(df: pl.DataFrame) -> None:
         pl.col("Salinity").alias("substrate_conc")
     ])
 
+    
     # Data: 3+n columns, containing three coulumns of additional information and n columns of growth data corresponding to time
     # Time: Numeric matrix, consisting of n columns for the time points and m rows for the different experiments.
     # Call grofit one row at a time because we dont have matching time points
     fit_results = []
     for _, data in df.group_by("experiment_id", "additional_info", "substrate_conc"):
-        df_wide = data.sort("Hours", descending=False).pivot(
+        df_wide = data.pivot(
             index=["experiment_id", "additional_info", "substrate_conc"],
             on="Hours",
             values="OD600",
@@ -1144,11 +1128,10 @@ def do_grofit(df: pl.DataFrame) -> None:
         np.savetxt("time.csv", [time_series], delimiter=",")
 
         # Execute grofit.R command
-        os.system(f"/Users/GeorgesKanaan/micromamba/envs/jupyter/bin/Rscript grofit.R")
+        os.system(f"Rscript grofit.R")
         
         # Read summary.csv into fit_results
-        if os.path.exists("summary.csv"):
-            fit_results.append(pd.read_csv("summary.csv"))
+        fit_results.append(pd.read_csv("summary.csv"))
         
     # Delete the files
     os.remove("data.csv")
@@ -1157,68 +1140,9 @@ def do_grofit(df: pl.DataFrame) -> None:
 
     # Concatenate the fit_results
     fit_results = pd.concat(fit_results)
-    fit_results.to_csv("grofit_results.csv", index=False)
-
-
-def process_grofit_results():
-    """
-    Get the grofit results and shape into a DataFrame.
-    """
-    # Load the grofit results
-    grofit_results = pd.read_csv("grofit_results.csv")
+    print(fit_results)
     
-    # Select the columns TestId	AddId	concentration	mu.spline	lambda.spline	A.spline	integral.spline
-    # Remove duplicates
-    grofit_results = grofit_results[["TestId", "AddId", "concentration", "mu.spline", "lambda.spline", "A.spline", "integral.spline"]].drop_duplicates()
     
-    # Rename to Unit, Step, Salinity, Slope, Lag, A, Integral
-    grofit_results = grofit_results.rename(columns={
-        "TestId": "Unit",
-        "AddId": "Step",
-        "concentration": "Salinity",
-        "mu.spline": "Slope",
-        "lambda.spline": "Lag",
-        "A.spline": "A",
-        "integral.spline": "Integral"
-    })
-    
-    return grofit_results
-
-
-def do_pyphe(df: pl.DataFrame) -> pd.DataFrame:
-    df = df.with_columns((pl.col("Hours") - pl.col("Hours").min()).over("Unit", "Step").alias("Hours"))
-    
-    results = []
-    
-    for names, data in df.group_by("Unit", "Step", "Salinity"):
-        # Get the data for pyphe then write to CSV
-        pyphe_df = data.select("Hours", "OD600").rename({"OD600": names[0] + "_Step" + str(names[1]) + "_" + names[2]}).sort("Hours", descending=False)
-        csv_name = f"pyphe_{names[0]}_Step{names[1]}_{names[2]}.csv".replace(" ", "_")
-        pyphe_df.write_csv(csv_name)
-
-        # Call pyphe then delete CSV
-        os.system(f"/Users/GeorgesKanaan/micromamba/envs/jupyter/bin/python /Users/GeorgesKanaan/micromamba/envs/jupyter/bin/pyphe-growthcurves --input {csv_name} --fitrange 20 --lag-method rel --plots --out pyphe_result  --t0-fitrange 10")
-        os.remove(csv_name)
-        
-        # Load the results, add the group information
-        result_csv = pd.read_csv(f"pyphe_result/{csv_name[:-4]}_results.csv", header=1, index_col=0).T
-        result_csv["Unit"] = names[0]
-        result_csv["Step"] = names[1]
-        result_csv["Salinity"] = names[2]
-        results.append(result_csv)
-
-    # Concatenate the results
-    pyphe_results = pd.concat(results)
-    pyphe_results = pyphe_results.rename(columns={"lag": "Lag", "max_slope": "Slope"})
-
-    # Set the dtypes to float for anything not a string
-    string_columns = ["Unit", "Step", "Salinity", "warning_bad_fit", "warning_negative_slope"]
-    for col in pyphe_results.columns:
-        if col not in string_columns:
-            pyphe_results[col] = pyphe_results[col].astype(float)
-
-    return pyphe_results
-
 
 ###############################################################################
 # Main Orchestration
@@ -1233,11 +1157,6 @@ def main():
     6. Fit slopes; plot rolling slopes, slopes, and lag times.
     7. Optionally run GrowthRates or threshold predictions.
     """
-    # Make all needed plot directories
-    os.makedirs("plots/fits/alt", exist_ok=True)
-    os.makedirs("plots/fits/bgme", exist_ok=True)
-    os.makedirs("plots/general", exist_ok=True)
-
     # Step 1: Load Data
     exp1_csv = load_data_for_exp1()
     latest_csv = find_latest_download_csv()
@@ -1247,53 +1166,47 @@ def main():
     df = transform_data(combined_lf)
 
     # Step 3: Rolling average plot
-    plot_10min_bins_whole_experiment(df)
+    # plot_10min_bins(df)
 
-    # Step 4: Classify steps, filter and plot
+    # Step 4: Classify steps and plot
     df = classify_steps(df)
-    df = filter_weird_steps(df)
-    plot_classified_steps(df)
+    # plot_classified_steps(df)
     
-    # Grofit analysis
     do_grofit(df)
-    slopes_and_lag = process_grofit_results()
-    plot_robust_max_slopes_and_lag(slopes_and_lag, "Grofit mu", "Grofit lambda", filename="plots/grofit_max_slopes_and_lags")
     
-    # Pyphe
-    slopes_and_lag = do_pyphe(df)
-    plot_robust_max_slopes_and_lag(slopes_and_lag, "Pyphe mu", "Pyphe lambda", filename="plots/pyphe_max_slopes_and_lags")
-    
-    # Step 5: Bin data into 10 mins and log, and plot binned curves
-    mean_df = bin_data(df, log=True)
-    plot_binned_data(mean_df)
+    # # Step 5: Bin data, and plot binned curves
+    # mean_df = bin_data(df)
+    # plot_binned_data(mean_df)
 
-    # Step 6: Filter weird steps, calculate slopes, then plot them (rolling + robust)
-    mean_df = filter_weird_steps(mean_df)
-    slopes_and_r2 = calculate_step_slopes_and_lag(mean_df, window_length=10)
-    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+    # # Step 6: Filter weird steps, calculate slopes, then plot them (rolling + robust)
+    # mean_df = filter_weird_steps(mean_df)
+    # slopes_and_r2 = calculate_step_slopes_and_lag(mean_df, window_length=10)
+    # slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
 
-    plot_rolling_slopes(mean_df.to_pandas(), window=10)
-    plot_selected_fits(slopes_and_r2, mean_df.to_pandas(), filename="plots/fits/bgme/fit")
-    plot_robust_max_slopes_and_lag(slopes_and_r2, "Max slopes", "Lag", filename="plots/robust_max_slopes_and_lags")
-    plot_robust_max_slopes_over_lag(slopes_and_r2, "Max slopes over Lag", filename="plots/robust_max_slopes_over_lag")
-    plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag", filename="plots/robust_last_step_od_over_lag")
+    # # Plot the data
+    # plot_rolling_slopes(mean_df.to_pandas(), window=10)
+    # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
+    # plot_robust_max_slopes_and_lag(slopes_and_r2, "Max slopes", "Lag")
+    # plot_robust_max_slopes_over_lag(slopes_and_r2, "Max slopes over Lag")
+    # plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag")
 
-    # Calculate steps and slopes alternatives
-    slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
-    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
-    
-    plot_selected_fits(slopes_and_r2, mean_df.to_pandas(), filename="plots/fits/alt/fit")
-    plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)", filename="plots/robust_avg_slopes_and_lags_alt")
-    plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)", filename="plots/robust_avg_slopes_over_lag_alt")
-    plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)", filename="plots/robust_generation_time_lag_ratio_over_step_alt")
-    plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag (alt)", filename="plots/robust_last_step_od_over_lag_alt")
+    # # # Calculate steps and slopes alternatives
+    # # slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
+    # # slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+    # #
+    # # # Plot the data
+    # # plot_selected_fits(slopes_and_r2, mean_df.to_pandas())
+    # # plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)")
+    # # plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)")
+    # # plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)")
+    # # plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag (alt)")
 
-    # Step 7 (Optional): Run GrowthRates or predict threshold
-    # do_grme(mean_df)
-    # predict_threshold_time(EQUATIONS, df, predict_od=0.30)
+    # # Step 7 (Optional): Run GrowthRates or predict threshold
+    # # do_grme(mean_df)
+    # # predict_threshold_time(EQUATIONS, df, predict_od=0.30)
 
-    # Print the weird steps that were removed
-    print(f"Removed steps: {WEIRD_STEPS}")
+    # # Print the weird steps that were removed
+    # print(f"Removed steps: {WEIRD_STEPS}")
 
 
 ###############################################################################
