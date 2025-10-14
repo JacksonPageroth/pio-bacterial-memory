@@ -25,6 +25,14 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import statsmodels.formula.api as smf
+import pandas as pd
+import numpy as np
+from scipy import stats
+from itertools import combinations
+from statsmodels.formula.api import ols
+
+import warnings
+import statsmodels.api as sm
 
 from adjustText import adjust_text
 from sklearn.linear_model import LinearRegression
@@ -542,10 +550,12 @@ def calculate_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.DataF
                 'R2': r2,
                 'Points': len(group),
                 'Salinity': group['Salinity'].values[0],
-                'Significant': r2 > 0.95,
+                'Significant': round(r2, 2) > 0.95,
                 'Lag': lag_time,
                 'Intercept': model.intercept_,
                 'SelectedIndices': selected_indices,
+                'x_data': x_filtered.reshape(y_filtered.shape),
+                'y_data': y_filtered
             })
 
     return pd.DataFrame(results)
@@ -621,9 +631,59 @@ def calculate_alt_step_slopes_and_lag(df: pl.DataFrame, window_length=6) -> pd.D
                 'Lag': lag_time,
                 'Intercept': model.intercept_,
                 'SelectedIndices': selected_indices,
+                'x_data': x_filtered,
+                'y_data': y_filtered
             })
 
     return pd.DataFrame(results)
+
+
+def compute_lines_are_different_test(slopes_and_r2: pd.DataFrame) -> pd.DataFrame:
+    comparisons = []
+    indices = list(slopes_and_r2.index)
+    pairs = list(combinations(indices, 2))
+    
+    for idx1, idx2 in pairs:
+        row1 = slopes_and_r2.loc[idx1]
+        row2 = slopes_and_r2.loc[idx2]
+        
+        # Stack data from both regressions
+        x_combined = np.concatenate([row1['x_data'], row2['x_data']])
+        y_combined = np.concatenate([row1['y_data'], row2['y_data']])
+        group = np.concatenate([np.zeros(len(row1['x_data'])), np.ones(len(row2['x_data']))])
+        
+        # Create dataframe with interaction term
+        combined_df = pd.DataFrame({
+            'x': x_combined,
+            'y': y_combined,
+            'group': group,
+            'x_group_interaction': x_combined * group
+        })
+        
+        # Fit model: y ~ x + group + x*group
+        model = ols('y ~ x + group + x_group_interaction', data=combined_df).fit()
+        
+        # Extract interaction statistics
+        interaction_coef = model.params['x_group_interaction']
+        interaction_se = model.bse['x_group_interaction']
+        interaction_pval = model.pvalues['x_group_interaction']
+        
+        reg1_id = f"Unit_{row1['Unit']}_Sal_{row1['Salinity']}"
+        reg2_id = f"Unit_{row2['Unit']}_Sal_{row2['Salinity']}"
+        
+        comparisons.append({
+            'Regression_1': reg1_id,
+            'Regression_2': reg2_id,
+            'Slope_1': row1['Slope'],
+            'Slope_2': row2['Slope'],
+            'Slope_Difference': row1['Slope'] - row2['Slope'],
+            'Interaction_Coefficient': interaction_coef,
+            'Interaction_SE': interaction_se,
+            'Interaction_p_value': interaction_pval,
+            'Significantly_Different': interaction_pval < 0.05
+        })
+    
+    return pd.DataFrame(comparisons)
 
 
 def plot_selected_fits(slopes_and_r2: pd.DataFrame, original_df: pd.DataFrame, filename: str) -> None:
@@ -755,6 +815,8 @@ def plot_robust_max_slopes_and_lag(
     lag_grid.fig.suptitle(lag_title)
     lag_grid.set_axis_labels("Step", "Lag time (Hours)")
 
+    robust_result = []
+    
     # Annotate both slope and lag figures
     for fig, fig_suptitle in [(slope_grid, slope_title), (lag_grid, lag_title)]:
         # Each facet is an Axes object
@@ -783,6 +845,7 @@ def plot_robust_max_slopes_and_lag(
                 slope = model.params["Step"]
                 intercept = model.params["Intercept"]
                 p_value = model.pvalues["Step"]
+                standard_error = model.bse["Step"]
 
                 annot_text = (
                     f"{sal}: y = {slope:.2g}x + {intercept:.2g}\n"
@@ -793,6 +856,18 @@ def plot_robust_max_slopes_and_lag(
                 x_point = subset["Step"].median()
                 # For consistency, compute the y_point from the regression line
                 y_point = intercept + slope * x_point
+
+                if fig == slope_grid:
+                    robust_result.append({
+                        'Unit': unit_value,
+                        'Salinity': sal,
+                        'Slope': slope,
+                        'Intercept': intercept,
+                        'p_value': p_value,
+                        'x_data': subset['Step'].values,
+                        'y_data': subset['Slope'].values if fig == slope_grid else subset['Lag'].values,
+                        'standard_error': standard_error,
+                    })
 
                 # Create the annotation text object in data coords
                 t = ax.annotate(
@@ -812,6 +887,8 @@ def plot_robust_max_slopes_and_lag(
             )
 
         fig.fig.savefig(f"{filename}_{fig_suptitle}.pdf", bbox_inches='tight', dpi=300)
+    
+    return pd.DataFrame(robust_result)
 
 
 def plot_robust_max_slopes_over_lag(
@@ -1282,22 +1359,23 @@ def main():
 
     plot_rolling_slopes(mean_df.to_pandas(), window=10)
     plot_selected_fits(slopes_and_r2, mean_df.to_pandas(), filename="plots/fits/bgme/fit")
-    plot_robust_max_slopes_and_lag(slopes_and_r2, "Max slopes", "Lag (Intercept)", filename="plots/robust_max_slopes_and_lags")
-    
-    exit
-    
-    plot_robust_max_slopes_over_lag(slopes_and_r2, "Max slopes over Lag", filename="plots/robust_max_slopes_over_lag")
-    plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag", filename="plots/robust_last_step_od_over_lag")
+    robust_result = plot_robust_max_slopes_and_lag(slopes_and_r2, "Max slopes", "Lag (Intercept)", filename="plots/robust_max_slopes_and_lags")
+
+    a = compute_lines_are_different_test(robust_result)
+    a.to_csv("plots/robust_lines_are_different.csv", index=False)
+
+    # plot_robust_max_slopes_over_lag(slopes_and_r2, "Max slopes over Lag", filename="plots/robust_max_slopes_over_lag")
+    # plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag", filename="plots/robust_last_step_od_over_lag")
 
     # Calculate steps and slopes alternatives
-    slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
-    slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
+    # slopes_and_r2 = calculate_alt_step_slopes_and_lag(mean_df, window_length=10)
+    # slopes_and_r2 = slopes_and_r2[slopes_and_r2["Significant"]]  # Only keep significant
     
-    plot_selected_fits(slopes_and_r2, mean_df.to_pandas(), filename="plots/fits/alt/fit")
-    plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)", filename="plots/robust_avg_slopes_and_lags_alt")
-    plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)", filename="plots/robust_avg_slopes_over_lag_alt")
-    plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)", filename="plots/robust_generation_time_lag_ratio_over_step_alt")
-    plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag (alt)", filename="plots/robust_last_step_od_over_lag_alt")
+    # plot_selected_fits(slopes_and_r2, mean_df.to_pandas(), filename="plots/fits/alt/fit")
+    # plot_robust_max_slopes_and_lag(slopes_and_r2, "Avg Slopes (alt)", "Lag (alt)", filename="plots/robust_avg_slopes_and_lags_alt")
+    # plot_robust_max_slopes_over_lag(slopes_and_r2, "Avg Slopes over Lag (alt)", filename="plots/robust_avg_slopes_over_lag_alt")
+    # plot_robust_generation_time_lag_ratio_over_step(slopes_and_r2, "Generation Time/Lag over Step (alt)", filename="plots/robust_generation_time_lag_ratio_over_step_alt")
+    # plot_robust_last_step_od_over_lag(mean_df.to_pandas(), slopes_and_r2, "Last step ln(OD600) over lag (alt)", filename="plots/robust_last_step_od_over_lag_alt")
 
     # Step 7 (Optional): Run GrowthRates or predict threshold
     # do_grme(mean_df)
