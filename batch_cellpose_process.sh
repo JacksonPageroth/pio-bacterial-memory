@@ -3,7 +3,7 @@
 # Batch CellPose Processing Script (No Preprocessing)
 # Usage: ./batch_cellpose_process.sh input_directory [diameter] [cellprob_threshold]
 
-set -e # Exit on any error
+set -x # Exit on any error
 
 # Function to display usage
 usage() {
@@ -67,8 +67,6 @@ EOF
 # Function to process a single image
 process_image() {
     local input_file="$1"
-    local diameter="$2"
-    local cellprob_threshold="$3"
     
     # Get base filename without extension
     local base_name=$(basename "$input_file" | sed 's/\.[^.]*$//')
@@ -78,15 +76,9 @@ process_image() {
     
     # Run CellPose directly on original image (suppress verbose output)
     local cellpose_cmd="python -m cellpose \
-        --image_path \"$input_file\" \
-        --diameter $diameter \
-        --cellprob_threshold $cellprob_threshold \
-        --flow_threshold 0.4 \
-        --min_size 30 \
-        --save_mpl \
-        --save_outlines \
-        --save_png \
-        --use_gpu"
+        --image_path $input_file \
+        --diameter 100 \
+        --use_gpu --pretrained_model /media/gio/E8D0-7B68/train/models/cpsam_20251015_121000"
     
     if eval $cellpose_cmd >/dev/null 2>&1; then
         # Extract statistics
@@ -95,8 +87,6 @@ process_image() {
         
         # Clean up CellPose output files
         rm -f "${input_dir}/${base_name}_seg.npy"
-        rm -f "${input_dir}/${base_name}.png"
-        rm -f "${input_dir}/${base_name}_cp_outlines.png"
         
         echo "$stats"
     else
@@ -161,7 +151,7 @@ for folder_path in "$INPUT_DIR"/*; do
         echo "Processing folder: $folder_name"
         
         # Find image files in this folder
-        find "$folder_path" -type f \( -iname "*.tif" -o -iname "*.tiff" -o -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" \) | while read -r image_file; do
+        find "$folder_path" -type f \( -iname "*.tif" -o -iname "*.tiff" -o -iname "*.JPG" -o -iname "*.jpg" -o -iname "*.jpeg" \) | while read -r image_file; do
             image_name=$(basename "$image_file")
             ((image_count++))
             
